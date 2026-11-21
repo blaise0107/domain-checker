@@ -1,4 +1,4 @@
-"""Отдельные просторные окна для «Доказательств» и «Подводных камней»."""
+"""Отдельные просторные окна для доказательств, камней и эталонных записей."""
 
 from __future__ import annotations
 
@@ -47,6 +47,16 @@ def pitfalls_as_text(verdict: Verdict) -> str:
             lines.append(f"\n📌 {p.title}\n{p.text}")
     if not verdict.warnings and not verdict.pitfalls:
         lines.append("Нет специальных предупреждений.")
+    return "\n".join(lines)
+
+
+def knowledge_as_text(verdict: Verdict) -> str:
+    lines = [f"Эталонные записи из базы знаний для {verdict.domain}", "=" * 60]
+    if verdict.knowledge:
+        for e in verdict.knowledge:
+            lines.append(f"\n{e.domain} → {e.level}: {e.action}\n{e.note}")
+    else:
+        lines.append("Домен в эталонной базе не найден.")
     return "\n".join(lines)
 
 
@@ -170,3 +180,29 @@ class PitfallsDialog(_BaseDetailDialog):
         self.browser.setHtml("".join(parts))
         layout.addWidget(self.browser, stretch=1)
         layout.addLayout(self._button_row("pitfalls", lambda: pitfalls_as_text(verdict)))
+
+
+class KnowledgeDialog(_BaseDetailDialog):
+    def __init__(self, verdict: Verdict, cfg) -> None:
+        super().__init__(f"Эталонные записи — {verdict.domain}", "knowledgeDialog/geometry", cfg)
+        layout = QVBoxLayout(self)
+        self.browser = QTextBrowser()
+        self.browser.setOpenExternalLinks(False)
+        parts: list[str] = []
+        if verdict.knowledge:
+            parts.append(
+                "<p>Записи из базы знаний, которые приложение сопоставило с этим доменом "
+                "(включая родительские домены и поддомены). Это помощь, а не готовый вердикт — "
+                "приоритет у живых замеров BlockCheck.</p>"
+            )
+            for e in verdict.knowledge:
+                parts.append(
+                    f"<p><code><b>{html.escape(e.domain)}</b></code> → <b>{html.escape(e.level)}</b>: "
+                    f"{html.escape(e.action)}<br>"
+                    f"<span style='color:#546e7a'>{html.escape(e.note)}</span></p><hr>"
+                )
+        else:
+            parts.append("<p>Домен в эталонной базе не найден.</p>")
+        self.browser.setHtml("".join(parts))
+        layout.addWidget(self.browser, stretch=1)
+        layout.addLayout(self._button_row("known", lambda: knowledge_as_text(verdict)))

@@ -22,7 +22,7 @@ from ..core.knowledge import Knowledge
 from ..core.normalize import candidate_hosts, normalize_domain
 from ..core.report import add_history, build_markdown, load_history
 from ..core.router import RouterClient
-from .detail_dialogs import EvidenceDialog, PitfallsDialog
+from .detail_dialogs import EvidenceDialog, KnowledgeDialog, PitfallsDialog
 from .hints import (
     MODE_LABELS, action_note, ai_prompt, mode_of, normalize_mode, tooltip, verdict_text,
 )
@@ -365,7 +365,13 @@ class MainWindow(QMainWindow):
         known_layout = QVBoxLayout(self.known_box)
         self.known_browser = QTextBrowser()
         self.known_browser.setToolTip(tooltip("known", mode))
+        self.known_browser.setMaximumHeight(110)
         known_layout.addWidget(self.known_browser)
+        self.known_open = QPushButton("Открыть полностью ↗")
+        self.known_open.setProperty("class", "secondary")
+        self.known_open.clicked.connect(self._open_known)
+        self.known_open.setToolTip(tooltip("open_known", mode))
+        known_layout.addWidget(self.known_open)
         layout.addWidget(self.known_box, stretch=1)
         return pane
 
@@ -590,6 +596,12 @@ class MainWindow(QMainWindow):
             return
         PitfallsDialog(self.verdict, self.cfg).exec()
 
+    def _open_known(self) -> None:
+        if self.verdict is None:
+            QMessageBox.information(self, "Нет данных", "Сначала проверьте домен.")
+            return
+        KnowledgeDialog(self.verdict, self.cfg).exec()
+
     def _on_mode_changed(self, index: int) -> None:
         keys = ["novice", "intermediate", "pro"]
         self.cfg.hint_mode = keys[index] if 0 <= index < len(keys) else "novice"
@@ -604,7 +616,8 @@ class MainWindow(QMainWindow):
             (self.evidence_open, "open_evidence"),
             (self.warnings_browser, "warnings"), (self.warnings_box, "warnings"),
             (self.warnings_open, "open_pitfalls"),
-            (self.known_browser, "known"), (self.known_box, "known"), (self.level_label, "level_label"),
+            (self.known_browser, "known"), (self.known_box, "known"), (self.known_open, "open_known"),
+            (self.level_label, "level_label"),
         ):
             widget.setToolTip(tooltip(key, mode))
         if self.verdict is not None:

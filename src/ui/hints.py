@@ -165,6 +165,11 @@ TOOLTIPS: dict[str, dict[str, str]] = {
         "intermediate": "Открыть полный список предупреждений и подводных камней.",
         "pro": "Open PitfallsDialog (full text, copy)",
     },
+    "open_known": {
+        "novice": "Открыть окно с тем, что приложение уже знает об этом сайте из своей базы проверенных доменов.",
+        "intermediate": "Открыть полный список эталонных записей из data/domains.json.",
+        "pro": "Open KnowledgeDialog (DomainEntry[] with notes)",
+    },
 }
 
 

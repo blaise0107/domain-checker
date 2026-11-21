@@ -5,8 +5,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.decision import Verdict  # noqa: E402
-from src.core.knowledge import Pitfall  # noqa: E402
-from src.ui.detail_dialogs import evidence_as_text, pitfalls_as_text  # noqa: E402
+from src.core.knowledge import DomainEntry, Pitfall  # noqa: E402
+from src.ui.detail_dialogs import evidence_as_text, knowledge_as_text, pitfalls_as_text  # noqa: E402
 
 
 def make_verdict():
@@ -37,6 +37,16 @@ class DetailDialogTests(unittest.TestCase):
         v.warnings = []
         v.pitfalls = []
         self.assertIn("Нет специальных предупреждений", pitfalls_as_text(v))
+
+    def test_knowledge_as_text(self):
+        v = make_verdict()
+        v.knowledge = [DomainEntry("chatgpt.com", "DNS", "Только DNS-правило", "Геоблок OpenAI")]
+        text = knowledge_as_text(v)
+        self.assertIn("chatgpt.com", text)
+        self.assertIn("Геоблок OpenAI", text)
+
+    def test_knowledge_empty(self):
+        self.assertIn("не найден", knowledge_as_text(make_verdict()))
 
 
 if __name__ == "__main__":

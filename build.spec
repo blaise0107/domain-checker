@@ -7,7 +7,7 @@ a = Analysis(
     ['launcher.py'],
     pathex=['.'],
     binaries=[],
-    datas=[('data/domains.json', 'data'), ('data/pitfalls.json', 'data')],
+    datas=[('data/domains.json', 'data'), ('data/pitfalls.json', 'data'), ('app.ico', '.')],
     hiddenimports=collect_submodules('paramiko'),
     hookspath=[],
     hooksconfig={},
@@ -34,5 +34,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='app.ico',
 )

@@ -21,6 +21,7 @@ class Config:
     blockcheck_timeout: float = 90.0
     ssh_timeout: float = 20.0
     save_password: bool = False  # по умолчанию пароль НЕ пишется в config.local.json (plaintext)
+    hint_mode: str = "novice"  # novice / intermediate / pro — режим подсказок
 
     @property
     def panel_url(self) -> str:

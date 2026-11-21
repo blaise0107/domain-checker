@@ -7,21 +7,25 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtCore import QSettings, Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
-    QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
+    QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from ..config import Config, load_config, save_config
+from ..config import Config, load_config, resource_dir, save_config
 from ..core.decision import Verdict, analyze
 from ..core.knowledge import Knowledge
 from ..core.normalize import candidate_hosts, normalize_domain
 from ..core.report import add_history, build_markdown, load_history
 from ..core.router import RouterClient
+from .hints import (
+    MODE_LABELS, action_note, ai_prompt, mode_of, normalize_mode, tooltip, verdict_text,
+)
+from .terminal import TerminalDialog
 
 LEVEL_COLORS = {
     "SNI": ("#fff3e0", "#e65100", "#ffb74d"),
@@ -106,6 +110,10 @@ class SettingsDialog(QDialog):
         self.bc_timeout = QSpinBox(); self.bc_timeout.setRange(10, 600); self.bc_timeout.setValue(int(cfg.blockcheck_timeout))
         self.save_password = QCheckBox("Сохранить пароль в config.local.json")
         self.save_password.setChecked(cfg.save_password)
+        self.hint_mode = QComboBox()
+        self.hint_mode.addItems([MODE_LABELS[k] for k in ("novice", "intermediate", "pro")])
+        self.hint_mode.setCurrentIndex(["novice", "intermediate", "pro"].index(normalize_mode(cfg.hint_mode)))
+        self.hint_mode.setToolTip(tooltip("hint_mode", cfg.hint_mode))
         # Не редактируется в UI, но не должен теряться при сохранении настроек.
         self._ssh_timeout = cfg.ssh_timeout
 
@@ -118,6 +126,7 @@ class SettingsDialog(QDialog):
         form.addRow("SSH порты (через запятую):", self.ssh_ports)
         form.addRow("Таймаут HTTP, с:", self.http_timeout)
         form.addRow("Таймаут BlockCheck, с:", self.bc_timeout)
+        form.addRow("Режим подсказок:", self.hint_mode)
         form.addRow("", self.save_password)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -142,6 +151,7 @@ class SettingsDialog(QDialog):
             blockcheck_timeout=float(self.bc_timeout.value()),
             ssh_timeout=self._ssh_timeout,
             save_password=self.save_password.isChecked(),
+            hint_mode=["novice", "intermediate", "pro"][self.hint_mode.currentIndex()],
         )
 
 
@@ -204,10 +214,24 @@ class MainWindow(QMainWindow):
         self.markdown: str = ""
         self.worker: CheckWorker | None = None
         self.setWindowTitle("Domain Checker — Keenetic / NFQWS2 / VPN-туннель")
+        self.settings = QSettings("VPN_Router", "DomainChecker")
         self.resize(1280, 820)
+        self._restore_geometry()
+        icon_path = resource_dir() / "app.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.setStyleSheet(STYLE)
         self._build_ui()
         self.statusBar().showMessage("Готово. Введите домен и нажмите Enter.")
+
+    def _restore_geometry(self) -> None:
+        raw = self.settings.value("geometry")
+        if raw is not None:
+            self.restoreGeometry(raw)
+
+    def _save_geometry(self) -> None:
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.sync()
 
     # ---------- построение интерфейса ----------
 
@@ -218,24 +242,49 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(14, 12, 14, 10)
         root.setSpacing(10)
 
+        mode = mode_of(self.cfg)
         top = QHBoxLayout()
-        top.addWidget(QLabel("Домен:"))
+        lbl = QLabel("Домен:")
+        lbl.setToolTip(tooltip("domain", mode))
+        top.addWidget(lbl)
         self.input = QLineEdit()
         self.input.setPlaceholderText("например: api.telegram.org  или  https://mistral.ai/chat")
         self.input.returnPressed.connect(self._on_check)
         self.input.setFont(QFont("Consolas", 12))
+        self.input.setToolTip(tooltip("domain", mode))
         top.addWidget(self.input, stretch=1)
+
         self.check_btn = QPushButton("Проверить")
         self.check_btn.setShortcut("Ctrl+Return")
         self.check_btn.clicked.connect(self._on_check)
+        self.check_btn.setToolTip(tooltip("check", mode))
         top.addWidget(self.check_btn)
+
+        mode_lbl = QLabel("Подсказки:")
+        mode_lbl.setToolTip(tooltip("hint_mode", mode))
+        top.addWidget(mode_lbl)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems([MODE_LABELS[k] for k in ("novice", "intermediate", "pro")])
+        self.mode_combo.setCurrentIndex(["novice", "intermediate", "pro"].index(mode))
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.mode_combo.setToolTip(tooltip("hint_mode", mode))
+        top.addWidget(self.mode_combo)
+
+        term_btn = QPushButton("Терминал роутера")
+        term_btn.setProperty("class", "secondary")
+        term_btn.clicked.connect(self._on_terminal)
+        term_btn.setToolTip(tooltip("terminal", mode))
+        top.addWidget(term_btn)
+
         settings_btn = QPushButton("Настройки")
         settings_btn.setProperty("class", "secondary")
         settings_btn.clicked.connect(self._on_settings)
+        settings_btn.setToolTip(tooltip("settings", mode))
         top.addWidget(settings_btn)
         history_btn = QPushButton("История")
         history_btn.setProperty("class", "secondary")
         history_btn.clicked.connect(self._on_history)
+        history_btn.setToolTip(tooltip("history", mode))
         top.addWidget(history_btn)
         root.addLayout(top)
 
@@ -251,12 +300,14 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(pane)
         layout.setContentsMargins(0, 0, 8, 0)
 
+        mode = mode_of(self.cfg)
         self.verdict_frame = QFrame()
         self.verdict_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.verdict_frame.setStyleSheet(self._verdict_style("UNKNOWN"))
         vf = QVBoxLayout(self.verdict_frame)
         self.level_label = QLabel("ОЖИДАНИЕ ПРОВЕРКИ")
         self.level_label.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 1px;")
+        self.level_label.setToolTip(tooltip("level_label", mode))
         self.title_label = QLabel("Введите домен выше и нажмите «Проверить»")
         self.title_label.setWordWrap(True)
         self.title_label.setStyleSheet("font-size: 18px; font-weight: 700; padding: 4px 0;")
@@ -268,26 +319,38 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.verdict_frame)
 
         evidence_box = QGroupBox("Доказательства")
+        evidence_box.setToolTip(tooltip("evidence", mode))
         ev_layout = QVBoxLayout(evidence_box)
         self.evidence_table = QTableWidget(0, 2)
         self.evidence_table.setHorizontalHeaderLabels(["Проверка", "Результат"])
-        self.evidence_table.horizontalHeader().setStretchLastSection(True)
         self.evidence_table.verticalHeader().setVisible(False)
         self.evidence_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.evidence_table.setWordWrap(True)
+        # Длинные значения не переносятся, а прокручиваются по горизонтали.
+        self.evidence_table.setWordWrap(False)
+        self.evidence_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.evidence_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.evidence_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.evidence_table.horizontalHeader().setStretchLastSection(False)
+        self.evidence_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.evidence_table.setColumnWidth(1, 620)
+        self.evidence_table.setToolTip(tooltip("evidence", mode))
         ev_layout.addWidget(self.evidence_table)
         layout.addWidget(evidence_box, stretch=2)
 
         warnings_box = QGroupBox("Предупреждения и подводные камни")
+        warnings_box.setToolTip(tooltip("warnings", mode))
         warn_layout = QVBoxLayout(warnings_box)
         self.warnings_browser = QTextBrowser()
         self.warnings_browser.setOpenExternalLinks(False)
+        self.warnings_browser.setToolTip(tooltip("warnings", mode))
         warn_layout.addWidget(self.warnings_browser)
         layout.addWidget(warnings_box, stretch=1)
 
         known_box = QGroupBox("Эталонные записи из базы знаний")
+        known_box.setToolTip(tooltip("known", mode))
         known_layout = QVBoxLayout(known_box)
         self.known_browser = QTextBrowser()
+        self.known_browser.setToolTip(tooltip("known", mode))
         known_layout.addWidget(self.known_browser)
         layout.addWidget(known_box, stretch=1)
         return pane
@@ -302,18 +365,28 @@ class MainWindow(QMainWindow):
 
         self.report_box = QGroupBox("Отчёт")
         report_layout = QHBoxLayout(self.report_box)
+        mode = mode_of(self.cfg)
         save_btn = QPushButton("Сохранить Markdown")
         save_btn.clicked.connect(self._save_report)
+        save_btn.setToolTip(tooltip("save_report", mode))
+        ai_btn = QPushButton("Скопировать для ИИ")
+        ai_btn.setProperty("class", "secondary")
+        ai_btn.clicked.connect(self._copy_ai_prompt)
+        ai_btn.setToolTip(tooltip("ai_copy", mode))
         panel_btn = QPushButton("Панель NFQWS2")
         panel_btn.setProperty("class", "secondary")
         panel_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.panel_url)))
+        panel_btn.setToolTip(tooltip("panel", mode))
         alt_btn = QPushButton("Панель :90 (обход РКН)")
         alt_btn.setProperty("class", "secondary")
         alt_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.alt_panel_url)))
+        alt_btn.setToolTip(tooltip("panel_alt", mode))
         avo_btn = QPushButton("VPN-туннель")
         avo_btn.setProperty("class", "secondary")
         avo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.tunnel_url)))
+        avo_btn.setToolTip(tooltip("tunnel", mode))
         report_layout.addWidget(save_btn)
+        report_layout.addWidget(ai_btn)
         report_layout.addWidget(panel_btn)
         report_layout.addWidget(alt_btn)
         report_layout.addWidget(avo_btn)
@@ -331,13 +404,19 @@ class MainWindow(QMainWindow):
     # ---------- проверка ----------
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        self._save_geometry()
         # Не завершать QApplication, пока CheckWorker ещё работает: иначе поток
-        # обратится к Destroyed-виджетам. Просто игнорируем закрытие.
+        # обратится к Destroyed-виджетам. Закроемся сами, когда он завершится.
         if self.worker and self.worker.isRunning():
-            self.statusBar().showMessage("Дождитесь завершения проверки, затем закройте окно.")
+            self.statusBar().showMessage("Идёт проверка — окно закроется после её завершения…")
+            self.worker.finished.connect(self._close_after_worker)
             event.ignore()
             return
         super().closeEvent(event)
+
+    def _close_after_worker(self) -> None:
+        self.worker = None
+        self.close()
 
     def _on_check(self) -> None:
         raw = self.input.text().strip()
@@ -368,10 +447,12 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Проверено: {verdict.domain} · {datetime.now():%H:%M:%S}")
 
     def _render_verdict(self, v: Verdict) -> None:
+        mode = mode_of(self.cfg)
+        level_text, title_text, summary_text = verdict_text(v, mode)
         self.verdict_frame.setStyleSheet(self._verdict_style(v.level))
-        self.level_label.setText(f"{v.level_title.upper()}  ·  уверенность: {v.confidence}")
-        self.title_label.setText(v.title)
-        self.summary_label.setText(v.summary)
+        self.level_label.setText(level_text)
+        self.title_label.setText(title_text)
+        self.summary_label.setText(summary_text)
 
         self.evidence_table.setRowCount(0)
         for label, value, status in v.evidence:
@@ -381,10 +462,10 @@ class MainWindow(QMainWindow):
             item = QTableWidgetItem(str(value))
             color = {"ok": "#1b5e20", "warn": "#e65100", "bad": "#b71c1c"}.get(status)
             if color:
-                from PySide6.QtGui import QColor
                 item.setForeground(QColor(color))
             self.evidence_table.setItem(row, 1, item)
-        self.evidence_table.resizeColumnsToContents()
+        # Ширина колонки фиксированная (см. _left_pane), иначе длинные значения
+        # растягивают таблицу и горизонтальная прокрутка не появляется.
 
         esc = html.escape
         warn_html = []
@@ -410,9 +491,13 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.setParent(None)
                 widget.deleteLater()
-        self.actions_layout.addWidget(QLabel("Куда именно прописывать:"))
+        mode = mode_of(self.cfg)
+        header = QLabel("Куда именно прописывать:")
+        header.setToolTip(tooltip("actions", mode))
+        self.actions_layout.addWidget(header)
         for idx, action in enumerate(v.actions, 1):
             box = QGroupBox(f"{idx}. {action.title}")
+            box.setToolTip(tooltip("actions", mode))
             layout = QVBoxLayout(box)
             if action.path:
                 path_label = QLabel(f"Путь: <code>{html.escape(action.path)}</code>")
@@ -431,33 +516,45 @@ class MainWindow(QMainWindow):
                 copy = QPushButton("Копировать команды")
                 copy.setProperty("class", "secondary")
                 copy.clicked.connect(lambda checked=False, text=action.commands: QApplication.clipboard().setText(text))
+                copy.setToolTip(tooltip("copy_commands", mode))
                 layout.addWidget(copy)
             if action.url:
                 open_btn = QPushButton(f"Открыть {action.url}")
                 open_btn.setProperty("class", "secondary")
                 open_btn.clicked.connect(lambda checked=False, url=action.url: QDesktopServices.openUrl(QUrl(url)))
                 layout.addWidget(open_btn)
-            if action.note:
-                note = QLabel(html.escape(action.note))
+            if action.note or mode == "novice":
+                note_text = action_note(action.note, v, mode, bool(action.commands))
+                note = QLabel(html.escape(note_text))
                 note.setWordWrap(True)
-                note.setStyleSheet("color: #546e7a;")
+                note.setStyleSheet("color: #546e7a; line-height: 140%;" if mode == "novice" else "color: #546e7a;")
                 layout.addWidget(note)
             self.actions_layout.addWidget(box)
 
         self.report_box = QGroupBox("Отчёт")
         report_layout = QHBoxLayout(self.report_box)
+        mode = mode_of(self.cfg)
         save_btn = QPushButton("Сохранить Markdown")
         save_btn.clicked.connect(self._save_report)
+        save_btn.setToolTip(tooltip("save_report", mode))
+        ai_btn = QPushButton("Скопировать для ИИ")
+        ai_btn.setProperty("class", "secondary")
+        ai_btn.clicked.connect(self._copy_ai_prompt)
+        ai_btn.setToolTip(tooltip("ai_copy", mode))
         panel_btn = QPushButton("Панель NFQWS2")
         panel_btn.setProperty("class", "secondary")
         panel_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.panel_url)))
+        panel_btn.setToolTip(tooltip("panel", mode))
         alt_btn = QPushButton("Панель :90 (обход РКН)")
         alt_btn.setProperty("class", "secondary")
         alt_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.alt_panel_url)))
+        alt_btn.setToolTip(tooltip("panel_alt", mode))
         avo_btn = QPushButton("VPN-туннель")
         avo_btn.setProperty("class", "secondary")
         avo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.tunnel_url)))
+        avo_btn.setToolTip(tooltip("tunnel", mode))
         report_layout.addWidget(save_btn)
+        report_layout.addWidget(ai_btn)
         report_layout.addWidget(panel_btn)
         report_layout.addWidget(alt_btn)
         report_layout.addWidget(avo_btn)
@@ -465,6 +562,40 @@ class MainWindow(QMainWindow):
         self.actions_layout.addStretch()
 
     # ---------- меню/сервис ----------
+
+    def _on_mode_changed(self, index: int) -> None:
+        keys = ["novice", "intermediate", "pro"]
+        self.cfg.hint_mode = keys[index] if 0 <= index < len(keys) else "novice"
+        save_config(self.cfg)
+        # Обновляем подсказки у инструментов без перезапуска.
+        mode = self.cfg.hint_mode
+        for widget in (self.input, self.check_btn, self.mode_combo, self.evidence_table,
+                       self.warnings_browser, self.known_browser, self.level_label):
+            widget.setToolTip(tooltip({
+                self.input: "domain", self.check_btn: "check", self.mode_combo: "hint_mode",
+                self.evidence_table: "evidence", self.warnings_browser: "warnings",
+                self.known_browser: "known", self.level_label: "level_label",
+            }[widget], mode))
+        if self.verdict is not None:
+            self._render_verdict(self.verdict)
+        self.statusBar().showMessage(f"Режим подсказок: {MODE_LABELS[mode]}")
+
+    def _on_terminal(self) -> None:
+        if not self.cfg.ssh_password:
+            QMessageBox.information(
+                self, "Пароль не задан",
+                "Откройте «Настройки» и введите пароль SSH роутера, чтобы подключиться к терминалу.",
+            )
+            return
+        dialog = TerminalDialog(self.cfg, self)
+        dialog.exec()
+
+    def _copy_ai_prompt(self) -> None:
+        if self.verdict is None:
+            QMessageBox.information(self, "Нет данных", "Сначала проверьте домен.")
+            return
+        QApplication.clipboard().setText(ai_prompt(self.verdict, self.cfg))
+        self.statusBar().showMessage("Отчёт для ИИ скопирован в буфер обмена.")
 
     def _save_report(self) -> None:
         if not self.markdown:
@@ -487,11 +618,15 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self.cfg = dialog.values()
+        idx = ["novice", "intermediate", "pro"].index(self.cfg.hint_mode)
+        self.mode_combo.setCurrentIndex(idx)
         ok, info = save_config(self.cfg)
         if ok:
             self.statusBar().showMessage(f"Настройки сохранены: {info}")
         else:
             QMessageBox.warning(self, "Не удалось сохранить", info)
+        if self.verdict is not None:
+            self._render_verdict(self.verdict)
 
     def _on_history(self) -> None:
         HistoryDialog(self).exec()

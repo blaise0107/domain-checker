@@ -15,7 +15,7 @@
 - `../02_Keenetic_Router/domain-lists.md`
 - `../02_Keenetic_Router/dns-server-rules.md`
 - `../03_Bypass_RKN/warp-and-tunnels.md`
-- `локальный skill diagnosing-blocked-domains-keenetic (не входит в репозиторий)`
+- локальный skill `diagnosing-blocked-domains-keenetic` (не входит в репозиторий)
 
 ## Уровни блокировки
 

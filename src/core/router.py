@@ -144,6 +144,10 @@ class RouterClient:
             try:
                 if int(done) < int(total):
                     return False
+                # done == total, но targets пуст (все цели отвалились или панель
+                # вернула неполный ответ) — не ждать до таймаута, а вернуть
+                # то, что есть. Иначе проверка висит ~90 секунд зря.
+                return True
             except (TypeError, ValueError):
                 pass
         targets = data.get("targets")

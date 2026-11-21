@@ -1,0 +1,21 @@
+# Локальные настройки и данные (могут содержать пароль SSH и историю проверок)
+config.local.json
+history.json
+domain_checker_error.log
+
+# Сборка PyInstaller
+build/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini

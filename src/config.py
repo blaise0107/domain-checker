@@ -15,12 +15,12 @@ class Config:
     alt_panel_port: int = 90
     tunnel_port: int = 8090
     ssh_user: str = "root"
-    ssh_password: str = ""  # задаётся пользователем в Настройках; не хранится в репозитории
+    ssh_password: str = "keenetic"  # заводской пароль Keenetic; в config.local.json не пишется (save_password=False)
     ssh_ports: tuple[int, ...] = (222, 22)
     http_timeout: float = 8.0
     blockcheck_timeout: float = 90.0
     ssh_timeout: float = 20.0
-    save_password: bool = True
+    save_password: bool = False  # по умолчанию пароль НЕ пишется в config.local.json (plaintext)
 
     @property
     def panel_url(self) -> str:

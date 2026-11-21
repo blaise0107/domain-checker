@@ -2,6 +2,7 @@
 config.local.json
 history.json
 domain_checker_error.log
+known_hosts.txt
 
 # Сборка PyInstaller
 build/

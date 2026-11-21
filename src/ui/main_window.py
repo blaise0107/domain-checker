@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -370,18 +371,19 @@ class MainWindow(QMainWindow):
             self.evidence_table.setItem(row, 1, item)
         self.evidence_table.resizeColumnsToContents()
 
+        esc = html.escape
         warn_html = []
         for w in v.warnings:
-            warn_html.append(f"<p>⚠️ <b>{w}</b></p>")
+            warn_html.append(f"<p>⚠️ <b>{esc(w)}</b></p>")
         for p in v.pitfalls:
-            warn_html.append(f"<p>📌 <b>{p.title}.</b> {p.text}</p>")
+            warn_html.append(f"<p>📌 <b>{esc(p.title)}.</b> {esc(p.text)}</p>")
         self.warnings_browser.setHtml("".join(warn_html) or "<p>Нет специальных предупреждений.</p>")
 
         known_html = []
         for e in v.knowledge:
             known_html.append(
-                f"<p><code>{e.domain}</code> → <b>{e.level}</b>: {e.action}<br>"
-                f"<span style='color:#546e7a'>{e.note}</span></p>"
+                f"<p><code>{esc(e.domain)}</code> → <b>{esc(e.level)}</b>: {esc(e.action)}<br>"
+                f"<span style='color:#546e7a'>{esc(e.note)}</span></p>"
             )
         self.known_browser.setHtml("".join(known_html) or "<p>Домен в эталонной базе не найден.</p>")
         self._render_actions(v)

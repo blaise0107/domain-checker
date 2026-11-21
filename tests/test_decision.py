@@ -144,6 +144,32 @@ class DecisionTests(unittest.TestCase):
         self.assertFalse(any(a.kind == "info" and "не существует" in a.title for a in v.actions))
         self.assertTrue(any("домен существует" in w for w in v.warnings))
 
+    def test_no_foreign_blockcheck_fallback(self):
+        """Результат BlockCheck другого кандидата не должен определять вердикт основного домена."""
+        data = base_data(
+            hosts=["example.com", "www.example.com"],
+            blockcheck={"ok": True, "targets": {
+                "www.example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0}}},
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        self.assertEqual(v.level, "OK")
+
+    def test_ip_proof_uses_only_target_host_ips(self):
+        """SYN_SENT на IP другого кандидата не должен давать IP-вердикт целевому хосту."""
+        data = base_data(
+            hosts=["example.com", "www.example.com"],
+            blockcheck={"ok": True, "targets": {
+                "example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0, "connect_ms": 12}}},
+            dns={"example.com": {"ok": True, "ips": ["1.1.1.1"]},
+                 "www.example.com": {"ok": True, "ips": ["9.9.9.9"]}},
+            ip_addresses=["1.1.1.1", "9.9.9.9"],
+            connections={"ok": True, "items": [
+                {"dst": "9.9.9.9", "dport": "443", "state": "SYN_SENT",
+                 "unreplied": True, "reply_bytes": 0}]},
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        self.assertEqual(v.level, "SNI")  # не IP: proof относится к www
+
     def test_report_contains_actions(self):
         data = base_data(blockcheck={"ok": True, "targets": {
             "example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0, "connect_ms": 12}}})

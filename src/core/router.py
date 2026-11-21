@@ -15,12 +15,26 @@ import requests
 from requests.exceptions import RequestException
 from urllib3.exceptions import InsecureRequestWarning
 
-from ..config import ROUTER_PATHS, Config
+from ..config import ROUTER_PATHS, Config, app_dir
 from .normalize import domain_matches, normalize_domain
 
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+class _TrustOnFirstUsePolicy(paramiko.MissingHostKeyPolicy):
+    """При первом подключении сохраняет ключ хоста, дальше проверяет его (защита от MITM)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def missing_host_key(self, client: paramiko.SSHClient, hostname: str, key) -> None:
+        client.get_host_keys().add(hostname, key.get_name(), key)
+        try:
+            client.get_host_keys().save(str(self.path))
+        except OSError:
+            pass
 
 
 def _first_ip(value: Any) -> str | None:
@@ -241,7 +255,13 @@ class RouterClient:
             _, stdout, stderr = self._ssh_client.exec_command(command, timeout=self.cfg.ssh_timeout)
             out = stdout.read().decode("utf-8", "replace")
             err = stderr.read().decode("utf-8", "replace")
-            result = {"ok": True, "error": None, "stdout": out, "stderr": err}
+            exit_code = stdout.channel.recv_exit_status()
+            if exit_code == 0:
+                result = {"ok": True, "error": None, "stdout": out, "stderr": err}
+            else:
+                detail = err.strip() or f"exit code {exit_code}"
+                result = {"ok": False, "error": detail, "stdout": out, "stderr": err,
+                          "exit_code": exit_code}
         except (paramiko.SSHException, OSError) as exc:
             result = {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
         self._ssh_cache[command] = result
@@ -254,8 +274,11 @@ class RouterClient:
                 return True
             self._ssh_client.close()
             self._ssh_client = None
+        known_hosts = app_dir() / "known_hosts.txt"
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if known_hosts.exists():
+            client.load_host_keys(str(known_hosts))
+        client.set_missing_host_key_policy(_TrustOnFirstUsePolicy(known_hosts))
         last_error = ""
         for port in self.cfg.ssh_ports:
             try:
@@ -317,11 +340,14 @@ class RouterClient:
         # Списки nfqws2
         list_matches: list[dict[str, str]] = []
         list_contents: dict[str, list[str]] = {}
-        ssh_ok = False
+        ssh_ok = True
+        list_errors: list[str] = []
         for key in ("list_general", "list_general_user", "list_exclude", "list_exclude_user", "list_google"):
             path = ROUTER_PATHS[key]
             data = self.cat(path)
-            ssh_ok = ssh_ok or bool(data.get("ok"))
+            if not data.get("ok"):
+                ssh_ok = False
+                list_errors.append(f"{key}: {data.get('error')}")
             lines = [line.strip() for line in data.get("stdout", "").splitlines() if line.strip()]
             list_contents[key] = lines
             for host in check_hosts:
@@ -333,7 +359,8 @@ class RouterClient:
                         continue  # DoH-резолверы учитываются отдельно
                     if domain_matches(line, host):
                         list_matches.append({"file": path, "line": line, "host": host, "short": key})
-        result["lists"] = {"ok": ssh_ok, "contents": list_contents, "matches": list_matches}
+        result["lists"] = {"ok": ssh_ok, "contents": list_contents, "matches": list_matches,
+                           "errors": list_errors}
 
         # dnsserver.json
         dns_data = self.cat(ROUTER_PATHS["dnsserver"])

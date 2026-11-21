@@ -107,7 +107,11 @@ def analyze(
     dns_info = next((v for k, v in data.get("dns", {}).items() if k == host), None)
     if dns_info is None:
         dns_info = next(iter(data.get("dns", {}).values()), {})
-    ips: list[str] = data.get("ip_addresses", [])
+    # IP только проверяемого хоста: общий список ip_addresses включает адреса
+    # www/редиректов/других кандидатов и даёт ложные IP-вердикты.
+    ips: list[str] = list((dns_info or {}).get("ips", []))
+    if not ips:
+        ips = list(data.get("ip_addresses", []))  # запасной вариант, если DNS-тест не выполнялся
     connections = data.get("connections", {})
     ip_proof = RouterClient.ip_block_evidence(connections.get("items", []), ips)
     known = knowledge.lookup(hosts)
@@ -118,9 +122,9 @@ def analyze(
     dns_matches = [m for m in data.get("dnsserver", {}).get("matches", []) if m.get("host") == host]
     avo_matches = data.get("tunnel", {}).get("matches", [])
 
+    # НЕ подменять результат основного хоста первым попавшимся: чужой результат
+    # (www, редирект, другой кандидат) привёл бы к неверному вердикту.
     bc_target = next((v for k, v in bc.get("targets", {}).items() if k == host), None)
-    if bc_target is None:
-        bc_target = next(iter(bc.get("targets", {}).values()), None)
     blocked = bool(bc_target and bc_target.get("blocked") is True)
     verdict_word = str(bc_target.get("verdict", "")).lower() if bc_target else ""
     bc_err = str(bc_target.get("err", "") or "").lower() if bc_target else ""
@@ -186,23 +190,17 @@ def analyze(
                             "сбой изоляции часто вызван переподключением PPPoE или рестартом nfqws2.")
     elif not blocked and bc.get("ok", False):
         # Провайдер НЕ блокирует (BlockCheck получил ответ 200/301/302/403).
-        # SYN_SENT на какой-то из IP — норма для DNS-релеев/балансировки:
-        # часть адресов мертва, но рабочие коннекты идут. IP-уровень не выставляем.
-        if ip_proof and (known_level in {"SNI", "IP", "REGION"}):
-            level = known_level if known_level != "IP" else "DNS"
-            confidence = "средняя"
-            warnings = ["BlockCheck показывает, что провайдер домен НЕ блокирует (есть ответ). "
-                        "SYN_SENT в conntrack относится к одному из адресов DNS-релея, "
-                        "а не к блокировке провайдера. VPN-туннель здесь не нужен."]
-        elif not blocked and suspicious_dns:
+        # conntrack здесь НЕ доказательство блокировки: SYN_SENT на один из IP
+        # релея/балансировки — норма. Опираемся на BlockCheck, DNS и базу знаний.
+        if suspicious_dns:
             level = "DNS"
             confidence = "средняя"
             warnings = ["BlockCheck блокировки не показал, но DNS-ответ подозрительный. "
                         "Проверьте запись А в панели вручную."]
-        elif not blocked and known_level == "REGION":
+        elif known_level == "REGION":
             level = "REGION"
             warnings = []
-        elif not blocked and known_level in {"SNI", "DNS", "IP", "OK"}:
+        elif known_level in {"SNI", "DNS", "IP", "OK"}:
             level = known_level
             confidence = "средняя" if known_level != "OK" else "высокая"
             if known_level == "IP":

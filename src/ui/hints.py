@@ -198,9 +198,9 @@ def verdict_text(verdict: Verdict, mode: str) -> tuple[str, str, str]:
             f"bc={raw.get('blockcheck', {}).get('targets', {})}",
             f"dns={raw.get('dns', {})}",
             f"ips={raw.get('ip_addresses', [])}",
-            f"lists_ok={raw.get('lists', {}).get('ok')} matches={raw.get('lists', {}).get('matches', [])[:5]}",
-            f"dns_rules={raw.get('dnsserver', {}).get('matches', [])[:3]}",
-            f"tunnel={raw.get('tunnel', {}).get('matches', [])[:3]}",
+            f"lists_ok={raw.get('lists', {}).get('ok')} matches={(raw.get('lists', {}).get('matches') or [])[:5]}",
+            f"dns_rules={(raw.get('dnsserver', {}).get('matches') or [])[:3]}",
+            f"tunnel={(raw.get('tunnel', {}).get('matches') or [])[:3]}",
         ]
         return level, title, "\n".join(str(b) for b in bits)
     return f"{verdict.level_title.upper()}  ·  уверенность: {verdict.confidence}", verdict.title, verdict.summary
@@ -217,7 +217,7 @@ def action_note(action_note_text: str, verdict: Verdict, mode: str, has_commands
             steps.append("2. Нажмите «Открыть терминал роутера» — пароль подставится сам.")
             steps.append("3. Вставьте команду правой кнопкой мыши и нажмите Enter.")
             steps.append("4. Проверьте, открылся ли сайт.")
-        elif action_note_text:
+        if action_note_text:
             steps.append(action_note_text)
         steps.append(plain["fix"])
         return "\n".join(s for s in steps if s)

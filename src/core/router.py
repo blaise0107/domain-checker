@@ -6,6 +6,8 @@ import ipaddress
 import json
 import re
 import shlex
+import os
+import threading
 import time
 import warnings
 from pathlib import Path
@@ -103,6 +105,9 @@ def classify_list_status(placements: list[dict[str, Any]]) -> dict[str, Any]:
     return {"status": "none", "message": "Домен ни в одном списке nfqws2 не найден.", "conflicts": []}
 
 
+_KNOWN_HOSTS_LOCK = threading.Lock()
+
+
 class _TrustOnFirstUsePolicy(paramiko.MissingHostKeyPolicy):
     """При первом подключении сохраняет ключ хоста, дальше проверяет его (защита от MITM)."""
 
@@ -111,10 +116,14 @@ class _TrustOnFirstUsePolicy(paramiko.MissingHostKeyPolicy):
 
     def missing_host_key(self, client: paramiko.SSHClient, hostname: str, key) -> None:
         client.get_host_keys().add(hostname, key.get_name(), key)
-        try:
-            client.get_host_keys().save(str(self.path))
-        except OSError:
-            pass
+        with _KNOWN_HOSTS_LOCK:
+            try:
+                # Атомарная запись: router.py и терминал могут писать из разных потоков.
+                tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+                client.get_host_keys().save(str(tmp))
+                os.replace(tmp, self.path)
+            except OSError:
+                pass
 
 
 def _first_ip(value: Any) -> str | None:

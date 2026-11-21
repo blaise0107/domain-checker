@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QThread, QUrl, Signal
+from PySide6.QtCore import QByteArray, QSettings, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
 
     def _restore_geometry(self) -> None:
         raw = self.settings.value("geometry")
-        if raw is not None:
+        if isinstance(raw, QByteArray) and not raw.isEmpty():
             self.restoreGeometry(raw)
 
     def _save_geometry(self) -> None:
@@ -244,9 +244,9 @@ class MainWindow(QMainWindow):
 
         mode = mode_of(self.cfg)
         top = QHBoxLayout()
-        lbl = QLabel("Домен:")
-        lbl.setToolTip(tooltip("domain", mode))
-        top.addWidget(lbl)
+        self.domain_lbl = QLabel("Домен:")
+        self.domain_lbl.setToolTip(tooltip("domain", mode))
+        top.addWidget(self.domain_lbl)
         self.input = QLineEdit()
         self.input.setPlaceholderText("например: api.telegram.org  или  https://mistral.ai/chat")
         self.input.returnPressed.connect(self._on_check)
@@ -260,9 +260,9 @@ class MainWindow(QMainWindow):
         self.check_btn.setToolTip(tooltip("check", mode))
         top.addWidget(self.check_btn)
 
-        mode_lbl = QLabel("Подсказки:")
-        mode_lbl.setToolTip(tooltip("hint_mode", mode))
-        top.addWidget(mode_lbl)
+        self.mode_lbl = QLabel("Подсказки:")
+        self.mode_lbl.setToolTip(tooltip("hint_mode", mode))
+        top.addWidget(self.mode_lbl)
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([MODE_LABELS[k] for k in ("novice", "intermediate", "pro")])
         self.mode_combo.setCurrentIndex(["novice", "intermediate", "pro"].index(mode))
@@ -270,22 +270,22 @@ class MainWindow(QMainWindow):
         self.mode_combo.setToolTip(tooltip("hint_mode", mode))
         top.addWidget(self.mode_combo)
 
-        term_btn = QPushButton("Терминал роутера")
-        term_btn.setProperty("class", "secondary")
-        term_btn.clicked.connect(self._on_terminal)
-        term_btn.setToolTip(tooltip("terminal", mode))
-        top.addWidget(term_btn)
+        self.term_btn = QPushButton("Терминал роутера")
+        self.term_btn.setProperty("class", "secondary")
+        self.term_btn.clicked.connect(self._on_terminal)
+        self.term_btn.setToolTip(tooltip("terminal", mode))
+        top.addWidget(self.term_btn)
 
-        settings_btn = QPushButton("Настройки")
-        settings_btn.setProperty("class", "secondary")
-        settings_btn.clicked.connect(self._on_settings)
-        settings_btn.setToolTip(tooltip("settings", mode))
-        top.addWidget(settings_btn)
-        history_btn = QPushButton("История")
-        history_btn.setProperty("class", "secondary")
-        history_btn.clicked.connect(self._on_history)
-        history_btn.setToolTip(tooltip("history", mode))
-        top.addWidget(history_btn)
+        self.settings_btn = QPushButton("Настройки")
+        self.settings_btn.setProperty("class", "secondary")
+        self.settings_btn.clicked.connect(self._on_settings)
+        self.settings_btn.setToolTip(tooltip("settings", mode))
+        top.addWidget(self.settings_btn)
+        self.history_btn = QPushButton("История")
+        self.history_btn.setProperty("class", "secondary")
+        self.history_btn.clicked.connect(self._on_history)
+        self.history_btn.setToolTip(tooltip("history", mode))
+        top.addWidget(self.history_btn)
         root.addLayout(top)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -313,14 +313,15 @@ class MainWindow(QMainWindow):
         self.title_label.setStyleSheet("font-size: 18px; font-weight: 700; padding: 4px 0;")
         self.summary_label = QLabel("")
         self.summary_label.setWordWrap(True)
+        self.summary_label.setTextFormat(Qt.TextFormat.PlainText)
         vf.addWidget(self.level_label)
         vf.addWidget(self.title_label)
         vf.addWidget(self.summary_label)
         layout.addWidget(self.verdict_frame)
 
-        evidence_box = QGroupBox("Доказательства")
-        evidence_box.setToolTip(tooltip("evidence", mode))
-        ev_layout = QVBoxLayout(evidence_box)
+        self.evidence_box = QGroupBox("Доказательства")
+        self.evidence_box.setToolTip(tooltip("evidence", mode))
+        ev_layout = QVBoxLayout(self.evidence_box)
         self.evidence_table = QTableWidget(0, 2)
         self.evidence_table.setHorizontalHeaderLabels(["Проверка", "Результат"])
         self.evidence_table.verticalHeader().setVisible(False)
@@ -335,24 +336,24 @@ class MainWindow(QMainWindow):
         self.evidence_table.setColumnWidth(1, 620)
         self.evidence_table.setToolTip(tooltip("evidence", mode))
         ev_layout.addWidget(self.evidence_table)
-        layout.addWidget(evidence_box, stretch=2)
+        layout.addWidget(self.evidence_box, stretch=2)
 
-        warnings_box = QGroupBox("Предупреждения и подводные камни")
-        warnings_box.setToolTip(tooltip("warnings", mode))
-        warn_layout = QVBoxLayout(warnings_box)
+        self.warnings_box = QGroupBox("Предупреждения и подводные камни")
+        self.warnings_box.setToolTip(tooltip("warnings", mode))
+        warn_layout = QVBoxLayout(self.warnings_box)
         self.warnings_browser = QTextBrowser()
         self.warnings_browser.setOpenExternalLinks(False)
         self.warnings_browser.setToolTip(tooltip("warnings", mode))
         warn_layout.addWidget(self.warnings_browser)
-        layout.addWidget(warnings_box, stretch=1)
+        layout.addWidget(self.warnings_box, stretch=1)
 
-        known_box = QGroupBox("Эталонные записи из базы знаний")
-        known_box.setToolTip(tooltip("known", mode))
-        known_layout = QVBoxLayout(known_box)
+        self.known_box = QGroupBox("Эталонные записи из базы знаний")
+        self.known_box.setToolTip(tooltip("known", mode))
+        known_layout = QVBoxLayout(self.known_box)
         self.known_browser = QTextBrowser()
         self.known_browser.setToolTip(tooltip("known", mode))
         known_layout.addWidget(self.known_browser)
-        layout.addWidget(known_box, stretch=1)
+        layout.addWidget(self.known_box, stretch=1)
         return pane
 
     def _right_pane(self) -> QWidget:
@@ -409,7 +410,7 @@ class MainWindow(QMainWindow):
         # обратится к Destroyed-виджетам. Закроемся сами, когда он завершится.
         if self.worker and self.worker.isRunning():
             self.statusBar().showMessage("Идёт проверка — окно закроется после её завершения…")
-            self.worker.finished.connect(self._close_after_worker)
+            self.worker.finished.connect(self._close_after_worker, Qt.ConnectionType.UniqueConnection)
             event.ignore()
             return
         super().closeEvent(event)
@@ -525,7 +526,8 @@ class MainWindow(QMainWindow):
                 layout.addWidget(open_btn)
             if action.note or mode == "novice":
                 note_text = action_note(action.note, v, mode, bool(action.commands))
-                note = QLabel(html.escape(note_text))
+                note = QLabel(note_text)
+                note.setTextFormat(Qt.TextFormat.PlainText)
                 note.setWordWrap(True)
                 note.setStyleSheet("color: #546e7a; line-height: 140%;" if mode == "novice" else "color: #546e7a;")
                 layout.addWidget(note)
@@ -569,13 +571,15 @@ class MainWindow(QMainWindow):
         save_config(self.cfg)
         # Обновляем подсказки у инструментов без перезапуска.
         mode = self.cfg.hint_mode
-        for widget in (self.input, self.check_btn, self.mode_combo, self.evidence_table,
-                       self.warnings_browser, self.known_browser, self.level_label):
-            widget.setToolTip(tooltip({
-                self.input: "domain", self.check_btn: "check", self.mode_combo: "hint_mode",
-                self.evidence_table: "evidence", self.warnings_browser: "warnings",
-                self.known_browser: "known", self.level_label: "level_label",
-            }[widget], mode))
+        for widget, key in (
+            (self.input, "domain"), (self.domain_lbl, "domain"), (self.check_btn, "check"),
+            (self.mode_combo, "hint_mode"), (self.mode_lbl, "hint_mode"),
+            (self.term_btn, "terminal"), (self.settings_btn, "settings"), (self.history_btn, "history"),
+            (self.evidence_table, "evidence"), (self.evidence_box, "evidence"),
+            (self.warnings_browser, "warnings"), (self.warnings_box, "warnings"),
+            (self.known_browser, "known"), (self.known_box, "known"), (self.level_label, "level_label"),
+        ):
+            widget.setToolTip(tooltip(key, mode))
         if self.verdict is not None:
             self._render_verdict(self.verdict)
         self.statusBar().showMessage(f"Режим подсказок: {MODE_LABELS[mode]}")
@@ -619,7 +623,9 @@ class MainWindow(QMainWindow):
             return
         self.cfg = dialog.values()
         idx = ["novice", "intermediate", "pro"].index(self.cfg.hint_mode)
+        self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentIndex(idx)
+        self.mode_combo.blockSignals(False)
         ok, info = save_config(self.cfg)
         if ok:
             self.statusBar().showMessage(f"Настройки сохранены: {info}")

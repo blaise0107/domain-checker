@@ -27,8 +27,14 @@ class ShellWorker(QThread):
         self._client: paramiko.SSHClient | None = None
 
     def send(self, line: str) -> None:
-        if self._channel and not self._channel.closed:
-            self._channel.send(line + "\r")
+        ch = self._channel
+        if ch is None or ch.closed:
+            self.error.emit("Нет соединения — команда не отправлена (дождитесь подключения).")
+            return
+        try:
+            ch.send(line + "\r")
+        except (OSError, paramiko.SSHException) as exc:
+            self.error.emit(f"Не удалось отправить команду: {exc}")
 
     def stop(self) -> None:
         self._stop = True
@@ -53,6 +59,8 @@ class ShellWorker(QThread):
             self._client = client
             last_error = ""
             for port in self.cfg.ssh_ports:
+                if self._stop:
+                    return
                 try:
                     client.connect(
                         hostname=self.cfg.router_host,
@@ -78,9 +86,13 @@ class ShellWorker(QThread):
                 self.error.emit(f"Не удалось подключиться к SSH ({last_error})")
                 return
 
+            if self._stop:
+                return
+            transport = client.get_transport()
+            peer = transport.sock.getpeername()[1] if transport and transport.sock else "?"
             self.output.emit(
                 f"=== Подключено к {self.cfg.ssh_user}@{self.cfg.router_host} "
-                f"(порт {client.get_transport().sock.getpeername()[1]}) ===\r\n"
+                f"(порт {peer}) ===\r\n"
             )
             channel = client.invoke_shell(term="xterm", width=120, height=32)
             self._channel = channel
@@ -178,5 +190,15 @@ class TerminalDialog(QDialog):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.worker.stop()
-        self.worker.wait(3000)
+        if not self.worker.wait(3000):
+            # Поток ещё в blocking connect(): отдаём QThread во владение приложению,
+            # иначе он уничтожится вместе с диалогом и уронит процесс.
+            from PySide6.QtWidgets import QApplication
+            try:
+                self.worker.output.disconnect()
+                self.worker.error.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self.worker.setParent(QApplication.instance())
+            self.worker.finished.connect(self.worker.deleteLater)
         super().closeEvent(event)

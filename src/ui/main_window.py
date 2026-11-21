@@ -324,6 +324,15 @@ class MainWindow(QMainWindow):
 
     # ---------- проверка ----------
 
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        # Не завершать QApplication, пока CheckWorker ещё работает: иначе поток
+        # обратится к Destroyed-виджетам. Просто игнорируем закрытие.
+        if self.worker and self.worker.isRunning():
+            self.statusBar().showMessage("Дождитесь завершения проверки, затем закройте окно.")
+            event.ignore()
+            return
+        super().closeEvent(event)
+
     def _on_check(self) -> None:
         raw = self.input.text().strip()
         if not raw:

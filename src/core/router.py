@@ -79,6 +79,7 @@ class RouterClient:
         self.session.headers.update({"User-Agent": "DomainChecker/1.0"})
         self._ssh_cache: dict[str, dict[str, Any]] = {}
         self._ssh_failure: str | None = None
+        self._ssh_mitm: bool = False
         self._ssh_client: paramiko.SSHClient | None = None
 
     # ---------- HTTP панель ----------
@@ -194,16 +195,31 @@ class RouterClient:
             return {"ok": False, "error": str(exc), "ips": [], "raw": None}
 
         error = data.get("error") if isinstance(data, dict) else None
-        ips = [ip for ip in _all_ips(data) if ip != self.cfg.router_host]
-        unique: list[str] = []
-        for ip in ips:
-            if ip not in unique:
-                unique.append(ip)
+        # Только A/AAAA-записи из answers: _all_ips(data) тащил бы IP из
+        # upstream (https://1.1.1.1/dns-query) и bootstrap_ips — ложные адреса
+        # попадали в conntrack и маршруты VPN-туннель.
+        wanted = "AAAA" if rtype.upper() == "AAAA" else "A"
+        ips: list[str] = []
+        answers = data.get("answers", []) if isinstance(data, dict) else []
+        for answer in answers if isinstance(answers, list) else []:
+            if not isinstance(answer, str):
+                continue
+            parts = answer.split()
+            if wanted not in parts:
+                continue
+            candidate = parts[-1]
+            try:
+                ipaddress.ip_address(candidate)
+            except ValueError:
+                continue
+            if candidate not in ips:
+                ips.append(candidate)
+        unique = [ip for ip in ips if ip != self.cfg.router_host]
         return {
             "ok": not error,
             "error": str(error) if error else None,
             "ips": unique,
-            "ip": _first_ip(data),
+            "ip": unique[0] if unique else None,
             "route": data.get("route") if isinstance(data, dict) else None,
             "upstream": data.get("upstream") if isinstance(data, dict) else None,
             "raw": data,
@@ -249,7 +265,12 @@ class RouterClient:
         if self._ssh_failure:
             return {"ok": False, "error": self._ssh_failure, "stdout": "", "stderr": ""}
         if not self._connect_ssh():
-            return {"ok": False, "error": self._ssh_failure or "SSH недоступен", "stdout": "", "stderr": ""}
+            error = self._ssh_failure or "SSH недоступен"
+            if self._ssh_mitm:
+                error += (" ВНИМАНИЕ: ключ хоста роутера изменился — это может быть атака "
+                          "MITM или смена ключа после перепрошивки. Проверьте known_hosts.txt.")
+            return {"ok": False, "error": error, "stdout": "", "stderr": "",
+                    "mitm": self._ssh_mitm}
 
         try:
             _, stdout, stderr = self._ssh_client.exec_command(command, timeout=self.cfg.ssh_timeout)
@@ -294,7 +315,12 @@ class RouterClient:
                     auth_timeout=self.cfg.ssh_timeout,
                 )
                 self._ssh_client = client
+                self._ssh_failure = None
+                self._ssh_mitm = False
                 return True
+            except paramiko.BadHostKeyException as exc:
+                self._ssh_mitm = True
+                last_error = f"порт {port}: несовпадение ключа хоста: {exc}"
             except (paramiko.SSHException, OSError) as exc:
                 last_error = f"порт {port}: {exc}"
         client.close()
@@ -308,7 +334,9 @@ class RouterClient:
         self.session.close()
 
     def cat(self, path: str) -> dict[str, Any]:
-        return self.ssh_read(f"cat {shlex.quote(path)} 2>/dev/null")
+        # Не подавляем stderr: при отсутствии файла он даёт понятную причину,
+        # а exit-код всё равно проверяется в ssh_read().
+        return self.ssh_read(f"cat {shlex.quote(path)}")
 
     # ---------- Сводный сбор данных ----------
 

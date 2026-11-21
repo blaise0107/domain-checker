@@ -440,9 +440,9 @@ def analyze(
             url=cfg.panel_url,
         ))
 
+    # Все подводные камни уровня показываем всегда: WARP-предупреждение
+    # особенно важно именно при недоступной панели (тесты с ПК недействительны).
     pitfalls = knowledge.pitfalls_for(level)
-    if not data.get("panel_ok"):
-        pitfalls = [p for p in pitfalls if p.id != "warp"] or knowledge.pitfalls_for(level)
     sources = [
         "02_Keenetic_Router/domain-lists.md",
         "02_Keenetic_Router/dns-server-rules.md",

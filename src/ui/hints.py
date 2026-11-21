@@ -180,6 +180,14 @@ def verdict_text(verdict: Verdict, mode: str) -> tuple[str, str, str]:
         title = verdict.title
         summary = (f"ПРОСТЫМИ СЛОВАМИ. {plain['what']}\n\n"
                    f"ЧТО ДЕЛАТЬ. {plain['fix']}")
+        raw = verdict.raw or {}
+        list_message = str((raw.get("lists") or {}).get("message", ""))
+        list_status = str((raw.get("lists") or {}).get("status", "none"))
+        if list_message:
+            if verdict.level == "OK" and list_status == "wrong_exclude":
+                list_message = ("Домен в списке исключений nfqws2 — обход для него выключен, "
+                                "и это правильно: сайт и так работает.")
+            summary += f"\n\nПРОВЕРКА СПИСКОВ НА РОУТЕРЕ. {list_message}"
         return level, title, summary
     if mode == "pro":
         level = f"{verdict.level} · {verdict.confidence} · {verdict.domain}"

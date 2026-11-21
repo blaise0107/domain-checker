@@ -111,8 +111,11 @@ def analyze(
     known = knowledge.lookup(hosts)
     known_level = _known_level(known, host)
 
+    list_status = str(data.get("lists", {}).get("status", "none"))
+    list_message = str(data.get("lists", {}).get("message", "Домен ни в одном списке nfqws2 не найден."))
     list_matches = [m for m in data.get("lists", {}).get("matches", []) if m.get("host") == host]
-    general_match = [m for m in list_matches if m.get("short") == "list_general"]
+    general_match = [m for m in list_matches
+                     if m.get("short") == "list_general" and not m.get("doh_only")]
     dns_matches = [m for m in data.get("dnsserver", {}).get("matches", []) if m.get("host") == host]
     # Маршрут считаем "уже добавленным" только если он относится к целевому
     # хосту или к его IP; совпадение у другого кандидата не считается.
@@ -261,6 +264,9 @@ def analyze(
             warnings.append("SSH к Entware недоступен — нельзя проверить, есть ли домен уже в списках.")
     if data.get("panel_ok") and dns_info and not dns_info.get("ok", False):
         warnings.append("DNS-тест роутера не удался — DNS-слой не проверен; вердикт опирается на BlockCheck.")
+    if (list_status in {"conflict", "wrong_exclude", "wrong_google", "wrong_doh"}
+            and level in {"SNI", "DNS"}):
+        warnings.append(list_message)
     for entry in known:
         if entry.level != level:
             warnings.append(f"В базе знаний для {entry.domain}: {entry.level} — {entry.action}. "
@@ -290,9 +296,9 @@ def analyze(
     else:
         evidence.append(("Conntrack", "признаков IP-блока нет"
                          if connections.get("ok") else "нет данных", "ok" if connections.get("ok") else "warn"))
-    evidence.append(("Списки nfqws2",
-                     "; ".join(f"{m['short']}: {m['line']}" for m in general_match) or "домен не найден",
-                     "warn" if general_match else "ok"))
+    status_color = {"ok": "ok", "none": "ok", "conflict": "bad",
+                    "wrong_exclude": "bad", "wrong_google": "warn", "wrong_doh": "warn"}.get(list_status, "warn")
+    evidence.append(("Списки nfqws2", list_message, status_color))
     evidence.append(("DNS Server rules",
                      f"совпадений: {len(dns_matches)} (всего {data.get('dnsserver', {}).get('rules_count', 0)})",
                      "ok" if dns_matches else "warn"))
@@ -318,7 +324,10 @@ def analyze(
         ))
 
     if level == "SNI":
-        already = bool(general_match or [m for m in list_matches if m.get("short") == "list_general_user"])
+        already = bool(general_match or [
+            m for m in list_matches
+            if m.get("short") == "list_general_user" and not m.get("doh_only")
+        ])
         # Если проверяемый домен уже в списке — показываем именно его, а не
         # родительский registrable domain (forum.ru-board.com != ru-board.com).
         line = host if already or _is_doh(host) else base

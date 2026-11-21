@@ -23,6 +23,85 @@ warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
+# Роль каждого списка nfqws2: включает обход, выключает его, только Google.
+LIST_ROLES = {
+    "list_general": "include",
+    "list_general_user": "include",
+    "list_exclude": "exclude",
+    "list_exclude_user": "exclude",
+    "list_google": "google",
+}
+
+# Человеческие названия файлов для подсказок.
+LIST_NAMES = {
+    "list_general": "list-general.list",
+    "list_general_user": "list-general-user.list",
+    "list_exclude": "list-exclude.list",
+    "list_exclude_user": "list-exclude-user.list",
+    "list_google": "list-google.list",
+}
+
+
+def classify_list_status(placements: list[dict[str, Any]]) -> dict[str, Any]:
+    """Классифицирует наличие домена в списках nfqws2.
+
+    placements — записи вида {short, line, host, doh_only}.
+    Возвращает {status, message, conflicts} где status:
+      none | ok | wrong_exclude | wrong_google | wrong_doh | conflict
+    """
+    roles = {p.get("short") for p in placements}
+    includes = [p for p in placements if LIST_ROLES.get(p.get("short", "")) == "include" and not p.get("doh_only")]
+    excludes = [p for p in placements if LIST_ROLES.get(p.get("short", "")) == "exclude"]
+    googles = [p for p in placements if LIST_ROLES.get(p.get("short", "")) == "google"]
+    doh_only = [p for p in placements if p.get("doh_only")]
+
+    def describe(items: list[dict[str, Any]]) -> str:
+        seen: list[str] = []
+        for p in items:
+            label = f"{LIST_NAMES.get(p.get('short', ''), p.get('short', '?'))}: {p.get('line', '')}"
+            if label not in seen:
+                seen.append(label)
+        return "; ".join(seen)
+
+    if includes and excludes:
+        return {
+            "status": "conflict",
+            "message": (f"КОНФЛИКТ: домен есть и в списке обхода ({describe(includes)}), "
+                        f"и в списке исключений ({describe(excludes)}). "
+                        "В списке исключений обход ВЫКЛЮЧАЕТСЯ — удалите оттуда эту запись."),
+            "conflicts": includes + excludes,
+        }
+    if excludes:
+        return {
+            "status": "wrong_exclude",
+            "message": (f"Домен находится в списке исключений ({describe(excludes)}), "
+                        "где обход nfqws2 ВЫКЛЮЧАЕТСЯ. Если сайт не открывается — уберите его оттуда "
+                        "и добавьте в list-general.list."),
+            "conflicts": list(excludes),
+        }
+    if googles and not includes:
+        return {
+            "status": "wrong_google",
+            "message": (f"Домен лежит в list-google.list ({describe(googles)}) — этот список только для "
+                        "доменов Google. Для обхода нужна запись в list-general.list."),
+            "conflicts": list(googles),
+        }
+    if doh_only and not includes:
+        return {
+            "status": "wrong_doh",
+            "message": (f"Запись с префиксом ^ ({describe(doh_only)}) — это только DoH-резолверы. "
+                        "Для обычного сайта нужна запись без ^ в list-general.list."),
+            "conflicts": list(doh_only),
+        }
+    if includes:
+        return {
+            "status": "ok",
+            "message": (f"Домен уже в правильном списке ({describe(includes)}) — обход применён, "
+                        "добавлять больше нечего. Запись без префикса покрывает поддомены."),
+            "conflicts": [],
+        }
+    return {"status": "none", "message": "Домен ни в одном списке nfqws2 не найден.", "conflicts": []}
+
 
 class _TrustOnFirstUsePolicy(paramiko.MissingHostKeyPolicy):
     """При первом подключении сохраняет ключ хоста, дальше проверяет его (защита от MITM)."""
@@ -388,6 +467,7 @@ class RouterClient:
 
         # Списки nfqws2
         list_matches: list[dict[str, str]] = []
+        placements: list[dict[str, Any]] = []  # вхождения проверяемого (первого) хоста
         list_contents: dict[str, list[str]] = {}
         ssh_ok = True
         list_errors: list[str] = []
@@ -404,12 +484,17 @@ class RouterClient:
                     if line.startswith("#"):
                         continue
                     doh_only = line.startswith("^")
-                    if doh_only:
-                        continue  # DoH-резолверы учитываются отдельно
                     if domain_matches(line, host):
-                        list_matches.append({"file": path, "line": line, "host": host, "short": key})
+                        item = {"file": path, "line": line, "host": host, "short": key,
+                                "doh_only": doh_only}
+                        list_matches.append(item)
+                        if host == check_hosts[0]:
+                            placements.append(item)
+        list_status = classify_list_status(placements)
         result["lists"] = {"ok": ssh_ok, "contents": list_contents, "matches": list_matches,
-                           "errors": list_errors}
+                           "errors": list_errors, "placements": placements,
+                           "status": list_status["status"], "message": list_status["message"],
+                           "conflicts": list_status["conflicts"]}
 
         # dnsserver.json
         dns_data = self.cat(ROUTER_PATHS["dnsserver"])

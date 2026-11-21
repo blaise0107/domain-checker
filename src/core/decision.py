@@ -8,7 +8,7 @@ from typing import Any
 
 from ..config import Config
 from .knowledge import DomainEntry, Knowledge, Pitfall
-from .normalize import registrable_domain
+from .normalize import domain_matches, registrable_domain
 from .router import RouterClient
 
 LEVEL_TITLES = {
@@ -83,13 +83,11 @@ def _fmt_bc(target: dict[str, Any] | None) -> str:
 
 
 def _known_level(entries: list[DomainEntry], host: str) -> str | None:
+    """Только точное совпадение домена. Наследовать вердикт другого кандидата нельзя."""
     for entry in entries:
         if entry.domain == host:
             return entry.level
-    for entry in entries:
-        if entry.level != "OK":
-            return entry.level
-    return entries[0].level if entries else None
+    return None
 
 
 def analyze(
@@ -104,23 +102,25 @@ def analyze(
     redirect = data.get("redirect_target")
 
     bc = data.get("blockcheck", {})
-    dns_info = next((v for k, v in data.get("dns", {}).items() if k == host), None)
-    if dns_info is None:
-        dns_info = next(iter(data.get("dns", {}).values()), {})
-    # IP только проверяемого хоста: общий список ip_addresses включает адреса
-    # www/редиректов/других кандидатов и даёт ложные IP-вердикты.
-    ips: list[str] = list((dns_info or {}).get("ips", []))
-    if not ips:
-        ips = list(data.get("ip_addresses", []))  # запасной вариант, если DNS-тест не выполнялся
+    # DNS и IP строго целевого хоста: подстановка данных www/редиректов даёт
+    # ложные DNS/IP-вердикты и лишние маршруты VPN-туннель.
+    dns_info: dict[str, Any] = data.get("dns", {}).get(host) or {}
+    ips: list[str] = list(dns_info.get("ips", []))
     connections = data.get("connections", {})
-    ip_proof = RouterClient.ip_block_evidence(connections.get("items", []), ips)
+    ip_proof = RouterClient.ip_block_evidence(connections.get("items", []), ips) if ips else []
     known = knowledge.lookup(hosts)
     known_level = _known_level(known, host)
 
     list_matches = [m for m in data.get("lists", {}).get("matches", []) if m.get("host") == host]
     general_match = [m for m in list_matches if m.get("short") == "list_general"]
     dns_matches = [m for m in data.get("dnsserver", {}).get("matches", []) if m.get("host") == host]
-    avo_matches = data.get("tunnel", {}).get("matches", [])
+    # Маршрут считаем "уже добавленным" только если он относится к целевому
+    # хосту или к его IP; совпадение у другого кандидата не считается.
+    avo_matches = [
+        m for m in data.get("tunnel", {}).get("matches", [])
+        if m.get("target") == host or m.get("target") in ips
+        or domain_matches(str(m.get("line", "")).split(":")[0], host)
+    ]
 
     # НЕ подменять результат основного хоста первым попавшимся: чужой результат
     # (www, редирект, другой кандидат) привёл бы к неверному вердикту.

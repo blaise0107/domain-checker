@@ -170,6 +170,46 @@ class DecisionTests(unittest.TestCase):
         v = analyze("example.com", data, self.knowledge, self.cfg)
         self.assertEqual(v.level, "SNI")  # не IP: proof относится к www
 
+    def test_known_level_no_foreign_inheritance(self):
+        """Без точного совпадения в базе знаний не наследуем чужой вердикт."""
+        from src.core.decision import _known_level
+        entries = self.knowledge.lookup(["api.telegram.org"])
+        self.assertIsNone(_known_level(entries, "unknown.example.com"))
+
+    def test_dns_of_other_candidate_not_used(self):
+        """DNS/IP другого кандидата не должен давать доказательства целевому хосту."""
+        data = base_data(
+            hosts=["example.com", "www.example.com"],
+            blockcheck={"ok": True, "targets": {
+                "example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0, "connect_ms": 12}}},
+            dns={"www.example.com": {"ok": True, "ips": ["9.9.9.9"]}},
+            ip_addresses=["9.9.9.9"],
+            connections={"ok": True, "items": [
+                {"dst": "9.9.9.9", "dport": "443", "state": "SYN_SENT",
+                 "unreplied": True, "reply_bytes": 0}]},
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        self.assertEqual(v.level, "SNI")
+
+    def test_foreign_avo_route_not_marked_existing(self):
+        """Маршрут другого домена в VPN-туннель не значит, что целевой адрес уже добавлен."""
+        data = base_data(
+            hosts=["example.com", "www.example.com"],
+            blockcheck={"ok": True, "targets": {
+                "example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0,
+                                "connect_ms": 0}}},
+            dns={"example.com": {"ok": True, "ips": ["1.1.1.1"]}},
+            ip_addresses=["1.1.1.1"],
+            connections={"ok": True, "items": [
+                {"dst": "1.1.1.1", "dport": "443", "state": "SYN_SENT",
+                 "unreplied": True, "reply_bytes": 0}]},
+            tunnel={"ok": True, "lines": ["9.9.9.9:443"], "matches": [
+                {"line": "9.9.9.9:443", "target": "www.example.com"}]},
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        action = next(a for a in v.actions if a.kind == "tunnel")
+        self.assertNotIn("уже есть", action.note)
+
     def test_report_contains_actions(self):
         data = base_data(blockcheck={"ok": True, "targets": {
             "example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0, "connect_ms": 12}}})

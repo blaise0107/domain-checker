@@ -103,7 +103,6 @@ class SettingsDialog(QDialog):
         self.host = QLineEdit(cfg.router_host)
         self.panel_port = QSpinBox(); self.panel_port.setRange(1, 65535); self.panel_port.setValue(cfg.panel_port)
         self.alt_panel_port = QSpinBox(); self.alt_panel_port.setRange(1, 65535); self.alt_panel_port.setValue(cfg.alt_panel_port)
-        self.avo_port = QSpinBox(); self.avo_port.setRange(1, 65535); self.avo_port.setValue(cfg.tunnel_port)
         self.ssh_user = QLineEdit(cfg.ssh_user)
         self.ssh_password = QLineEdit(cfg.ssh_password); self.ssh_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.ssh_ports = QLineEdit(", ".join(str(p) for p in cfg.ssh_ports))
@@ -121,7 +120,6 @@ class SettingsDialog(QDialog):
         form.addRow("Адрес роутера:", self.host)
         form.addRow("Порт панели NFQWS2:", self.panel_port)
         form.addRow("Порт альт. панели обхода (:90):", self.alt_panel_port)
-        form.addRow("Порт панели VPN-туннель:", self.avo_port)
         form.addRow("SSH пользователь:", self.ssh_user)
         form.addRow("SSH пароль:", self.ssh_password)
         form.addRow("SSH порты (через запятую):", self.ssh_ports)
@@ -144,7 +142,6 @@ class SettingsDialog(QDialog):
             router_host=self.host.text().strip() or "192.168.1.1",
             panel_port=self.panel_port.value(),
             alt_panel_port=self.alt_panel_port.value(),
-            tunnel_port=self.avo_port.value(),
             ssh_user=self.ssh_user.text().strip() or "root",
             ssh_password=self.ssh_password.text(),
             ssh_ports=ports or (222, 22),
@@ -214,7 +211,7 @@ class MainWindow(QMainWindow):
         self.verdict: Verdict | None = None
         self.markdown: str = ""
         self.worker: CheckWorker | None = None
-        self.setWindowTitle("Domain Checker — Keenetic / NFQWS2 / VPN-туннель")
+        self.setWindowTitle("Domain Checker — Keenetic / NFQWS2")
         self.settings = QSettings("VPN_Router", "DomainChecker")
         self.resize(1280, 820)
         self._restore_geometry()
@@ -401,15 +398,10 @@ class MainWindow(QMainWindow):
         alt_btn.setProperty("class", "secondary")
         alt_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.alt_panel_url)))
         alt_btn.setToolTip(tooltip("panel_alt", mode))
-        avo_btn = QPushButton("VPN-туннель")
-        avo_btn.setProperty("class", "secondary")
-        avo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.tunnel_url)))
-        avo_btn.setToolTip(tooltip("tunnel", mode))
         report_layout.addWidget(save_btn)
         report_layout.addWidget(ai_btn)
         report_layout.addWidget(panel_btn)
         report_layout.addWidget(alt_btn)
-        report_layout.addWidget(avo_btn)
         self.actions_layout.addWidget(self.report_box)
         self.actions_layout.addStretch()
         scroll.setWidget(widget)
@@ -570,15 +562,10 @@ class MainWindow(QMainWindow):
         alt_btn.setProperty("class", "secondary")
         alt_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.alt_panel_url)))
         alt_btn.setToolTip(tooltip("panel_alt", mode))
-        avo_btn = QPushButton("VPN-туннель")
-        avo_btn.setProperty("class", "secondary")
-        avo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.cfg.tunnel_url)))
-        avo_btn.setToolTip(tooltip("tunnel", mode))
         report_layout.addWidget(save_btn)
         report_layout.addWidget(ai_btn)
         report_layout.addWidget(panel_btn)
         report_layout.addWidget(alt_btn)
-        report_layout.addWidget(avo_btn)
         self.actions_layout.addWidget(self.report_box)
         self.actions_layout.addStretch()
 

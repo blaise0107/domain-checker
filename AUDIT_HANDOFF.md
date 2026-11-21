@@ -4,7 +4,7 @@
 
 ## Что это за проект
 
-`Domain Checker` — десктопное приложение (Windows 11) для диагностики доменов на роутере Keenetic с NFQWS2 Strategy Selector и VPN-туннель.
+`Domain Checker` — десктопное приложение (Windows 11) для диагностики доменов на роутере Keenetic с NFQWS2 Strategy Selector.
 
 - Репозиторий: `https://github.com/blaise0107/domain-checker` (ветка `main`).
 - Стек: Python 3.14, PySide6 6.12, requests, paramiko 5.0, PyInstaller 6.22; exe ~54 МБ.
@@ -21,21 +21,20 @@
 | `:8090/api/blockcheck` (POST + polling `GET /api/blockcheck/{id}` по `done/total`) | `blocked`, `verdict`, `code`, `err`, `ttfb_ms` — эталон, выполняется на роутере |
 | `:8090/api/dnsserver/test` | A/AAAA, `route`, `upstream`, `answers` (обязательно поле `type`) |
 | `:8090/api/connections` | conntrack: `SYN_SENT` + `unreplied` + `reply_bytes=0` → доказательство IP-блока |
-| SSH Entware `:222` (фолбэк `:22`), `root` / заводской `keenetic` | чтение `list-general.list`, `list-general-user.list`, `list-exclude*`, `list-google.list`, `dnsserver.json`, `/opt/etc/vpn/list-general.list` |
-| Панель VPN-туннель `:8090` | состояние туннеля, формат `адрес[:порт]`, домены без масок |
+| SSH Entware `:222` (фолбэк `:22`), `root` / заводской `keenetic` | чтение `list-general.list`, `list-general-user.list`, `list-exclude*`, `list-google.list`, `dnsserver.json` |
 | Панель `:90` | `nfqws-keenetic-web` (nfqws v1, обход РКН/YouTube) — только ссылка в GUI |
 
 Безопасность SSH: `save_password=False` по умолчанию (пароль не пишется в `config.local.json`), ключ хоста сохраняется в `known_hosts.txt` по имени `[host]:port` и проверяется при следующих подключениях (TOFU-политика `_TrustOnFirstUsePolicy`).
 
 ## Уровни вердикта
 
-`SNI` → `list-general.list` + рестарт nfqws2; `DNS` → правило DNS Server (для геоблока OpenAI — релей `sync.bezmezhau.com`); `IP` → VPN-туннель/туннель (крайняя мера); `REGION` и `OK` → роутер не трогать; `NXDOMAIN` → домена не существует; `UNKNOWN` → нет данных.
+`SNI` → `list-general.list` + рестарт nfqws2; `DNS` → правило DNS Server (для геоблока OpenAI — релей `sync.bezmezhau.com`); `IP` → VPN/WARP-туннель (крайняя мера); `REGION` и `OK` → роутер не трогать; `NXDOMAIN` → домена не существует; `UNKNOWN` → нет данных.
 
 Ключевые файлы: `src/core/decision.py` (движок), `src/core/router.py` (опрос), `src/config.py`, `src/core/normalize.py`, `src/core/knowledge.py` (`data/*.json`), `src/ui/main_window.py`, `src/core/report.py`.
 
 ## Уже исправлено (16 проблем, два круга аудита с ChatGPT)
 
-1. IP-доказательства и IP для VPN-туннель — только адреса **целевого** хоста, без кандидатов/www/редиректов.
+1. IP-доказательства — только адреса **целевого** хоста, без кандидатов/www/редиректов.
 2. Убран fallback к первому попавшемуся результату BlockCheck чужого домена.
 3. При успешном BlockCheck conntrack не влияет на вердикт.
 4. `_known_level()` — только точное совпадение домена, без наследования чужой записи.
@@ -54,7 +53,7 @@
 
 ### Третий круг (находки Qwen из `chat.qwen.ai`, применены)
 
-17. `dns_test()` берёт IP **только из `answers` нужного типа** (A/AAAA): раньше `_all_ips(data)` тащил адреса из `upstream` (`https://1.1.1.1/dns-query`) и `bootstrap_ips` в conntrack/VPN-туннель.
+17. `dns_test()` берёт IP **только из `answers` нужного типа** (A/AAAA): раньше `_all_ips(data)` тащил адреса из `upstream` (`https://1.1.1.1/dns-query`) и `bootstrap_ips` в conntrack.
 18. `cat()` больше не подавляет stderr — при отсутствии файла видна причина; exit-код проверяется.
 19. SSH: сброс «липкого» `_ssh_failure` после успешного подключения; `BadHostKeyException` отделяется от ordinary ошибок порта и помечается как возможный MITM.
 20. GUI: `closeEvent` блокирует закрытие окна, пока работает `CheckWorker` (иначе краш из-за Destroyed-виджетов).
@@ -87,7 +86,7 @@ Qwen всё-таки завершил аудит и выдал таблицу и
 
 | Домен | Почему чекер должен быть осторожен |
 |---|---|
-| `api.telegram.org` | реальный IP-блок: `SYN_SENT/unreplied/0 байт` + BlockCheck timeout → VPN-туннель — крайняя мера |
+| `api.telegram.org` | реальный IP-блок: `SYN_SENT/unreplied/0 байт` + BlockCheck timeout → VPN/WARP — крайняя мера |
 | `chatgpt.com` | работает через DNS-релей; `SYN_SENT` на соседний IP релея — норма, не блок |
 | `forum.ru-board.com` | BlockCheck не резолвит через `1.1.1.1`, но DNS роутера даёт IP; домен уже в `list-general.list` |
 | `ozon.ru` | циклический редирект `?__rr=1` — не блок |

@@ -60,12 +60,6 @@
       "levels": ["IP"],
       "title": "Локальные прокси Telegram не для ботов",
       "text": "Прокси на роутере (1433, 1443, SOCKS5 1080) говорят MTProto/FakeTLS — aiogram с ними не работает. Bot API нужен WARP/VPN на машине с ботом."
-    },
-    {
-      "id": "avo-format",
-      "levels": ["IP"],
-      "title": "Формат VPN-туннель",
-      "text": "Список /opt/etc/vpn/list-general.list принимает адрес или адрес:порт (порт по умолчанию 443); домены резолвятся при применении; маски вида *.example.com не поддерживаются. Управление: http://192.168.1.1:8090/ или /opt/bin/nfqws2 add host:443."
     }
   ]
 }

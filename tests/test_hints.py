@@ -41,7 +41,6 @@ class HintTests(unittest.TestCase):
         v = make_verdict("SNI", raw={
             "lists": {"ok": True, "matches": None},
             "dnsserver": {"matches": None},
-            "tunnel": {"matches": None},
         })
         _, _, summary = verdict_text(v, "pro")
         self.assertIn("lists_ok", summary)

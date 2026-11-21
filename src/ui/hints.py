@@ -35,7 +35,7 @@ LEVEL_PLAIN: dict[str, dict[str, str]] = {
         "name": "Доступ закрыт по IP-адресу",
         "what": "Провайдер блокирует соединение напрямую с адресом сайта — просто не пропускает пакеты. "
                 "Ни список обхода, ни настройки DNS здесь не помогут.",
-        "fix": "Это самый крайний случай. Нужен туннель (VPN-туннель) или VPN на компьютере. "
+        "fix": "Это самый крайний случай. Нужен VPN-туннель или VPN/WARP на компьютере. "
                "Если сайт и так открывается — ничего делать не надо.",
     },
     "REGION": {
@@ -95,7 +95,7 @@ TOOLTIPS: dict[str, dict[str, str]] = {
     "evidence": {
         "novice": "Здесь собраны все проверки, которые сделало приложение. "
                   "Зелёный — всё хорошо, оранжевый — стоит внимания, красный — проблема.",
-        "intermediate": "Результаты BlockCheck, DNS, conntrack, списков nfqws2, правил DNS и VPN-туннель.",
+        "intermediate": "Результаты BlockCheck, DNS, conntrack, списков nfqws2 и правил DNS.",
         "pro": "Verdict.evidence[] — (label, value, status)",
     },
     "warnings": {
@@ -137,11 +137,6 @@ TOOLTIPS: dict[str, dict[str, str]] = {
         "novice": "Открывает другую панель обхода для РКН и YouTube.",
         "intermediate": "Открыть nfqws-keenetic-web (:90).",
         "pro": "http://<host>:90",
-    },
-    "tunnel": {
-        "novice": "Открывает настройки платного туннеля. Используется только в крайнем случае.",
-        "intermediate": "Открыть панель управления VPN-туннель (:8090).",
-        "pro": "http://<host>:8090",
     },
     "hint_mode": {
         "novice": "Выберите, насколько подробные подсказки вам нужны: "
@@ -215,7 +210,6 @@ def verdict_text(verdict: Verdict, mode: str) -> tuple[str, str, str]:
             f"ips={raw.get('ip_addresses', [])}",
             f"lists_ok={raw.get('lists', {}).get('ok')} matches={(raw.get('lists', {}).get('matches') or [])[:5]}",
             f"dns_rules={(raw.get('dnsserver', {}).get('matches') or [])[:3]}",
-            f"tunnel={(raw.get('tunnel', {}).get('matches') or [])[:3]}",
         ]
         return level, title, "\n".join(str(b) for b in bits)
     return f"{verdict.level_title.upper()}  ·  уверенность: {verdict.confidence}", verdict.title, verdict.summary
@@ -244,7 +238,7 @@ def action_note(action_note_text: str, verdict: Verdict, mode: str, has_commands
 def ai_prompt(verdict: Verdict, cfg: Config) -> str:
     """Готовый компактный промпт для ИИ со всеми собранными данными."""
     lines = [
-        "Проанализируй диагностику домена. Приложение — Domain Checker (Keenetic + NFQWS2 + VPN-туннель).",
+        "Проанализируй диагностику домена. Приложение — Domain Checker (Keenetic + NFQWS2).",
         "",
         f"Домен: {verdict.domain}",
         f"Кандидаты: {', '.join(verdict.candidates)}",
@@ -269,7 +263,7 @@ def ai_prompt(verdict: Verdict, cfg: Config) -> str:
     lines += [
         "",
         "КОНФИГУРАЦИЯ ПОДКЛЮЧЕНИЯ:",
-        f"panel={cfg.panel_url} alt={cfg.alt_panel_url} tunnel={cfg.tunnel_url} "
+        f"panel={cfg.panel_url} alt={cfg.alt_panel_url} "
         f"ssh={cfg.ssh_user}@{cfg.router_host}:{cfg.ssh_ports}",
         "",
         "Скажи, согласен ли ты с вердиктом и если нет — на каком уровне проблема "

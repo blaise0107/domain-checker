@@ -35,7 +35,7 @@
     {"domain": "connect.facebook.net", "level": "SNI", "action": "list-general.list", "note": "Добавлено 09.11.2026: TLS-handshake timeout -> 302, connect 0.115с."},
     {"domain": "facebook.net", "level": "SNI", "action": "list-general.list", "note": "Добавлено вместе с connect.facebook.net."},
     {"domain": "fbcdn.net", "level": "SNI", "action": "list-general.list", "note": "Добавлено вместе с connect.facebook.net."},
-    {"domain": "myauth2.com", "level": "IP", "action": "VPN-туннель (list-general.list)", "note": "154.83.140.119:5005/7708 — блок по IP:порту. Рабочий проброс сделан через VPN-туннель на роутере."},
+    {"domain": "myauth2.com", "level": "IP", "action": "VPN/WARP-туннель", "note": "Блок по нестандартным портам; списки nfqws2 и DNS-правила не помогают, нужен туннель."},
     {"domain": "advertauth.com", "level": "IP", "action": "Ничего не поможет", "note": "80.85.155.31:5005 — сервер мёртв глобально, timeout у всех провайдеров."},
     {"domain": "youtube.com", "level": "SNI", "action": "nfqws2 / Nova", "note": "TCP проходит, ответ замирает — DPI. DNS тут ни при чём."},
     {"domain": "ozon.ru", "level": "OK", "action": "Ничего не нужно", "note": "Российский маркетплейс. BlockCheck может ошибочно дать blocked=true/verdict=error из-за циклического редиректа ?__rr=1 (stopped after 10 redirects) — это не блок, списки и DNS-правила не нужны."},

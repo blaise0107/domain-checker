@@ -103,7 +103,7 @@ def analyze(
 
     bc = data.get("blockcheck", {})
     # DNS и IP строго целевого хоста: подстановка данных www/редиректов даёт
-    # ложные DNS/IP-вердикты и лишние маршруты VPN-туннель.
+    # ложные DNS/IP-вердикты.
     dns_info: dict[str, Any] = data.get("dns", {}).get(host) or {}
     ips: list[str] = list(dns_info.get("ips", []))
     connections = data.get("connections", {})
@@ -117,14 +117,6 @@ def analyze(
     general_match = [m for m in list_matches
                      if m.get("short") == "list_general" and not m.get("doh_only")]
     dns_matches = [m for m in data.get("dnsserver", {}).get("matches", []) if m.get("host") == host]
-    # Маршрут считаем "уже добавленным" только если он относится к целевому
-    # хосту или к его IP; совпадение у другого кандидата не считается.
-    avo_matches = [
-        m for m in data.get("tunnel", {}).get("matches", [])
-        if m.get("target") == host or m.get("target") in ips
-        or domain_matches(str(m.get("line", "")).split(":")[0], host)
-    ]
-
     # НЕ подменять результат основного хоста первым попавшимся: чужой результат
     # (www, редирект, другой кандидат) привёл бы к неверному вердикту.
     bc_target = next((v for k, v in bc.get("targets", {}).items() if k == host), None)
@@ -213,12 +205,12 @@ def analyze(
             if known_level == "IP":
                 warnings = ["База знаний: для этого домена подтверждён блок по IP (провайдер роняет SYN). "
                             "Сейчас BlockCheck не показал блок — проверьте conntrack в момент сбоя. "
-                            "Если сервис не открывается — VPN-туннель/туннель остаётся крайней мерой."]
+                            "Если сервис не открывается — VPN-туннель остаётся крайней мерой."]
             elif known_level in {"SNI", "DNS"}:
                 if dns_matches:
                     warnings = ["DNS-правило для этого домена уже настроено в панели, "
                                 "BlockCheck блокировки не показывает — дополнительных действий не требуется. "
-                                "VPN-туннель не нужен."]
+                                "Туннель не нужен."]
                 else:
                     warnings = ["База знаний: для этого домена требуется DNS-правило/релей. "
                                 "Сейчас BlockCheck блокировки не показывает, но правило в панели не найдено — "
@@ -302,9 +294,6 @@ def analyze(
     evidence.append(("DNS Server rules",
                      f"совпадений: {len(dns_matches)} (всего {data.get('dnsserver', {}).get('rules_count', 0)})",
                      "ok" if dns_matches else "warn"))
-    evidence.append(("VPN-туннель routes",
-                     "; ".join(m["line"] for m in avo_matches) or "адрес не найден",
-                     "warn" if avo_matches else "ok"))
     if redirect:
         evidence.append(("Редирект", redirect, "warn"))
     evidence.append(("База знаний", f"совпадений: {len(known)}", "ok" if known else "warn"))
@@ -319,7 +308,7 @@ def analyze(
             title="Домен не существует — проверьте написание",
             note="BlockCheck не смог резолвить имя даже через публичный резолвер 8.8.8.8 "
                  "(`no such host` / NXDOMAIN). Это не блокировка и не подмена DNS: "
-                 "такого домена нет в DNS. Добавление в списки nfqws2, DNS-правила или VPN-туннель "
+                 "такого домена нет в DNS. Добавление в списки nfqws2, DNS-правила или туннель "
                  "ничего не изменят. Проверьте опечатку, зону (.ru/.com) и существует ли сайт вообще.",
         ))
 
@@ -383,7 +372,7 @@ def analyze(
                     upstreams.append(address)
             note += (" Для этого домена правило уже настроено" +
                      (f" (апстрим: {', '.join(upstreams)})" if upstreams else "") +
-                     ". Если сайт открывается — ничего менять не нужно; VPN-туннель здесь не нужен.")
+                     ". Если сайт открывается — ничего менять не нужно; туннель здесь не нужен.")
         actions.append(Action(
             kind="dns",
             title=("DNS-правило уже настроено — проверьте, что всё работает"
@@ -410,30 +399,12 @@ def analyze(
         target = base
         if ips:
             target = ips[0]
-        ip_lines = [f"{ip}:443" for ip in ips[:5]] or [f"{base}:443"]
-        line = "; ".join(ip_lines)
-        already = bool(avo_matches)
-        commands = "\n".join(f"/opt/bin/nfqws2 add {entry}" for entry in ip_lines)
-        commands += "\n# либо через панель: «Быстрое добавление / удаление»"
         actions.append(Action(
             kind="tunnel",
-            title="VPN-туннель — маршрут через туннель",
-            path="/opt/etc/vpn/list-general.list",
-            line=line,
-            commands=commands,
-            note=("Адрес уже есть в списке — повторное добавление ничего не изменит. " if already else "")
-                 + "Формат: адрес или адрес:порт (порт по умолчанию 443); домены резолвятся при применении; "
-                   "маски *.example.com не поддерживаются. Учтите реальный порт сервиса "
-                   "(например 5005/7708 у AdwertApp). Для домен с несколькими A-записями добавляйте все адреса.",
-            url=cfg.tunnel_url,
-        ))
-        actions.append(Action(
-            kind="client",
-            title="Либо VPN/WARP на клиенте",
-            note="Списки nfqws2 и DNS-правила при блоке по IP не помогают. "
-                 "Для Bot API локальные MTProto-прокси роутера (1433/1443/1080) не подходят — "
-                 "нужен WARP/VPN на машине с ботом. WARPUDP/2408 на самом Keenetic не работает "
-                 "(DPI режет WireGuard после handshake).",
+            title="VPN/WARP — туннель для этого адреса",
+            note="Списки nfqws2 и DNS-правила при блоке по IP не помогают: провайдер роняет SYN "
+                 "напрямую к адресу. Нужен VPN/WARP, через который пойдёт трафик к этому сервису. "
+                 "Если сайт уже открывается — ничего менять не нужно.",
         ))
 
     elif level == "REGION":
@@ -479,7 +450,7 @@ def analyze(
     elif level == "DNS":
         headline = f"Добавить DNS-правило для {host}"
     elif level == "IP":
-        headline = f"Завернуть {target} через VPN-туннель / VPN на клиенте"
+        headline = f"Завернуть {target} через VPN/WARP"
     elif level == "REGION":
         headline = "Геоблок сервиса — на роутере не лечится"
     elif level == "OK":

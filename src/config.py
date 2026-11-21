@@ -13,7 +13,6 @@ class Config:
     router_host: str = "192.168.1.1"
     panel_port: int = 8090
     alt_panel_port: int = 90
-    tunnel_port: int = 8090
     ssh_user: str = "root"
     ssh_password: str = "keenetic"  # заводской пароль Keenetic; в config.local.json не пишется (save_password=False)
     ssh_ports: tuple[int, ...] = (222, 22)
@@ -30,10 +29,6 @@ class Config:
     @property
     def alt_panel_url(self) -> str:
         return f"http://{self.router_host}:{self.alt_panel_port}/"
-
-    @property
-    def tunnel_url(self) -> str:
-        return f"http://{self.router_host}:{self.tunnel_port}/"
 
 
 def app_dir() -> Path:
@@ -98,5 +93,4 @@ ROUTER_PATHS = {
     "list_exclude_user": "/opt/etc/nfqws2/lists/list-exclude-user.list",
     "list_google": "/opt/etc/nfqws2/lists/list-google.list",
     "dnsserver": "/opt/etc/nfqws2-strategy/dnsserver.json",
-    "tunnel_routes": "/opt/etc/vpn/list-general.list",
 }

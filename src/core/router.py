@@ -1,4 +1,4 @@
-"""Опрос роутера: HTTP API панели NFQWS2 (:8090), read-only SSH (Entware), VPN-туннель."""
+"""Опрос роутера: HTTP API панели NFQWS2 (:8090) и read-only SSH (Entware)."""
 
 from __future__ import annotations
 
@@ -301,7 +301,7 @@ class RouterClient:
         error = data.get("error") if isinstance(data, dict) else None
         # Только A/AAAA-записи из answers: _all_ips(data) тащил бы IP из
         # upstream (https://1.1.1.1/dns-query) и bootstrap_ips — ложные адреса
-        # попадали в conntrack и маршруты VPN-туннель.
+        # попадали в conntrack и создавали ложные IP-вердикты.
         wanted = "AAAA" if rtype.upper() == "AAAA" else "A"
         ips: list[str] = []
         answers = data.get("answers", []) if isinstance(data, dict) else []
@@ -465,7 +465,6 @@ class RouterClient:
             "connections": {"ok": False, "error": "панель недоступна", "items": []},
             "lists": {},
             "dnsserver": {"ok": False, "error": "панель недоступна", "rules": [], "matches": []},
-            "tunnel": {"ok": False, "error": "панель недоступна", "lines": [], "matches": []},
         }
 
         if panel_ok:
@@ -529,28 +528,6 @@ class RouterClient:
             "error": dns_data.get("error"),
             "rules_count": len(rules),
             "matches": matches,
-        }
-
-        # VPN-туннель list-general.list
-        avo_data = self.cat(ROUTER_PATHS["tunnel_routes"])
-        avo_lines = [line.strip() for line in avo_data.get("stdout", "").splitlines() if line.strip()]
-        avo_matches: list[dict[str, str]] = []
-        targets = set(check_hosts)
-        for host in check_hosts:
-            for dns_info in result["dns"].values():
-                targets.update(dns_info.get("ips", []))
-        for line in avo_lines:
-            if line.startswith("#"):
-                continue
-            base = line.split()[0].split(":")[0].lower()
-            for target in targets:
-                if base == target or domain_matches(base, target):
-                    avo_matches.append({"line": line, "target": target})
-        result["tunnel"] = {
-            "ok": avo_data.get("ok", False),
-            "error": avo_data.get("error"),
-            "lines": avo_lines,
-            "matches": avo_matches,
         }
 
         result["ip_addresses"] = sorted({ip for info in result["dns"].values() for ip in info.get("ips", [])})

@@ -22,7 +22,6 @@ def base_data(**overrides):
         "connections": {"ok": True, "items": []},
         "lists": {"ok": True, "contents": {}, "matches": []},
         "dnsserver": {"ok": True, "error": None, "rules_count": 0, "matches": []},
-        "tunnel": {"ok": True, "error": None, "lines": [], "matches": []},
     }
     data.update(overrides)
     return data
@@ -91,7 +90,7 @@ class DecisionTests(unittest.TestCase):
         v = analyze("chatgpt.com", data, self.knowledge, self.cfg)
         self.assertEqual(v.level, "DNS")
         self.assertFalse(any(a.kind in {"tunnel", "client"} for a in v.actions))
-        self.assertTrue(any("VPN-туннель не нужен" in w for w in v.warnings))
+        self.assertTrue(any("Туннель не нужен" in w for w in v.warnings))
 
     def test_nonexistent_domain_is_nxdomain(self):
         """'no such host' от BlockCheck — это NXDOMAIN, а не подмена DNS."""
@@ -191,8 +190,8 @@ class DecisionTests(unittest.TestCase):
         v = analyze("example.com", data, self.knowledge, self.cfg)
         self.assertEqual(v.level, "SNI")
 
-    def test_foreign_avo_route_not_marked_existing(self):
-        """Маршрут другого домена в VPN-туннель не значит, что целевой адрес уже добавлен."""
+    def test_tunnel_action_for_ip_block(self):
+        """IP-блок всегда даёт нейтральную рекомендацию VPN/WARP без привязки к панели."""
         data = base_data(
             hosts=["example.com", "www.example.com"],
             blockcheck={"ok": True, "targets": {
@@ -203,12 +202,11 @@ class DecisionTests(unittest.TestCase):
             connections={"ok": True, "items": [
                 {"dst": "1.1.1.1", "dport": "443", "state": "SYN_SENT",
                  "unreplied": True, "reply_bytes": 0}]},
-            tunnel={"ok": True, "lines": ["9.9.9.9:443"], "matches": [
-                {"line": "9.9.9.9:443", "target": "www.example.com"}]},
         )
         v = analyze("example.com", data, self.knowledge, self.cfg)
         action = next(a for a in v.actions if a.kind == "tunnel")
-        self.assertNotIn("уже есть", action.note)
+        self.assertFalse(action.url)
+        self.assertFalse(action.commands)
 
     def test_dns_verdict_beats_ip_proof(self):
         """DNS-подмена (verdict=dns) важнее conntrack SYN_SENT — не IP-блок."""

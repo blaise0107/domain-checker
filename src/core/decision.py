@@ -132,8 +132,10 @@ def analyze(
     # BlockCheck часто не может резолвить через 1.1.1.1/8.8.8.8 (изоляция,
     # перехват или недоступность публичного резолвера у провайдера) и выдаёт
     # «no such host» для вполне существующего домена — это НЕ NXDOMAIN.
+    # NXDOMAIN требует УСПЕШНОГО, но пустого DNS-замера: если тест роутера
+    # просто упал (ok=False), «no such host» от BlockCheck не доказывает NXDOMAIN.
     nxdomain = (
-        verdict_word == "dns" and not ips and (
+        verdict_word == "dns" and dns_info.get("ok", False) and not ips and (
             "no such host" in bc_err or "nxdomain" in bc_err
             or "name error" in bc_err or "nodata" in bc_err
         )
@@ -150,7 +152,9 @@ def analyze(
             "redirect" in bc_err or "stopped after" in bc_err
         )
     )
-    suspicious_dns = (not dns_info.get("ok", False)) or (not ips) or any(_suspicious_ip(ip) for ip in ips)
+    # Провал DNS-замера (ok=False, сетевая ошибка) НЕ подмена: подозрительным
+    # считаем только успешный пустой/мусорный ответ.
+    suspicious_dns = (dns_info.get("ok", False) and not ips) or any(_suspicious_ip(ip) for ip in ips)
 
     # ---------- выбор уровня ----------
     confidence = "высокая"
@@ -221,11 +225,13 @@ def analyze(
         else:
             level = "OK"
             warnings = []
+    elif blocked and verdict_word == "dns":
+        # BlockCheck — эталон: вердикт DNS важнее conntrack. SYN_SENT на
+        # подставной DNS-адрес — следствие подмены DNS, а не IP-блока.
+        level = "DNS"
+        warnings = []
     elif ip_proof:
         level = "IP"
-        warnings = []
-    elif blocked and verdict_word == "dns":
-        level = "DNS"
         warnings = []
     elif blocked and (verdict_word == "timeout" or verdict_word == "error"):
         if known_level == "IP" or _zero_connect(bc_target):
@@ -247,7 +253,14 @@ def analyze(
     if not data.get("panel_ok", False):
         warnings.append("Панель NFQWS2 (:8090) не отвечает — живые замеры отсутствуют.")
     if not data.get("lists", {}).get("ok", False):
-        warnings.append("SSH к Entware недоступен — нельзя проверить, есть ли домен уже в списках.")
+        list_errors = data.get("lists", {}).get("errors") or []
+        if list_errors:
+            warnings.append("Не все списки nfqws2 прочитаны (" + "; ".join(list_errors[:3]) +
+                            ") — проверка «уже в списке» может быть неполной.")
+        else:
+            warnings.append("SSH к Entware недоступен — нельзя проверить, есть ли домен уже в списках.")
+    if data.get("panel_ok") and dns_info and not dns_info.get("ok", False):
+        warnings.append("DNS-тест роутера не удался — DNS-слой не проверен; вердикт опирается на BlockCheck.")
     for entry in known:
         if entry.level != level:
             warnings.append(f"В базе знаний для {entry.domain}: {entry.level} — {entry.action}. "
@@ -262,7 +275,8 @@ def analyze(
     bc_value = _fmt_bc(bc_target) if bc.get("ok") else (bc.get("error") or "нет данных")
     if bc_err:
         bc_value += f" · {bc_err[:200]}"
-    evidence.append((f"BlockCheck: {host}", bc_value, "bad" if nxdomain else ("ok" if bc.get("ok") else "bad")))
+    evidence.append((f"BlockCheck: {host}", bc_value,
+                     "bad" if (nxdomain or blocked) else ("ok" if bc.get("ok") else "bad")))
     dns_value = ", ".join(ips) if ips else (dns_info.get("error") or "нет ответа")
     if dns_info.get("route"):
         dns_value += f" · маршрут: {dns_info['route']}"
@@ -505,11 +519,19 @@ def _zero_connect(target: dict[str, Any] | None) -> bool:
     value = target.get("connect_ms", target.get("connect"))
     if value in (None, ""):
         return False
+    text = str(value).strip().lower()
+    if text.endswith("ms"):
+        text = text[:-2]
+    elif text.endswith("s"):
+        text = text[:-1]
     try:
-        return float(str(value).replace("s", "")) == 0.0
+        return float(text) == 0.0
     except ValueError:
         return False
 
 
 def _is_doh(host: str) -> bool:
-    return any(token in host for token in ("dns.google", "cloudflare-dns", "dns.comss", "doh"))
+    if any(token in host for token in ("dns.google", "cloudflare-dns", "dns.comss")):
+        return True
+    # «doh» как отдельный label, а не подстрока (иначе playdoh.com — DoH).
+    return "doh" in host.split(".")

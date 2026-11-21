@@ -61,6 +61,11 @@ def load_config() -> Config:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         raw.pop("_comment", None)
+        # save_password=False пишет ssh_password:"" — пустая строка не должна
+        # затирать заводской пароль по умолчанию, иначе SSH ломается после
+        # первого же сохранения настроек и перезапуска.
+        if not raw.get("ssh_password"):
+            raw.pop("ssh_password", None)
         if "ssh_ports" in raw and isinstance(raw["ssh_ports"], list):
             raw["ssh_ports"] = tuple(int(p) for p in raw["ssh_ports"])
         known = {f for f in Config.__dataclass_fields__}

@@ -8,6 +8,7 @@ import re
 import shlex
 import time
 import warnings
+from pathlib import Path
 from typing import Any
 
 import paramiko
@@ -114,6 +115,7 @@ class RouterClient:
 
         deadline = time.monotonic() + self.cfg.blockcheck_timeout
         data: dict[str, Any] = {}
+        poll_errors = 0
         while time.monotonic() < deadline:
             try:
                 resp = self.session.get(
@@ -123,7 +125,13 @@ class RouterClient:
                 resp.raise_for_status()
                 data = resp.json()
             except (RequestException, ValueError) as exc:
-                return {"ok": False, "error": f"опрос BlockCheck: {exc}", "targets": {}}
+                # Одна transient-ошибка GET не должна обнулять всю проверку.
+                poll_errors += 1
+                if poll_errors >= 3:
+                    return {"ok": False, "error": f"опрос BlockCheck: {exc}", "targets": {}}
+                time.sleep(1.5)
+                continue
+            poll_errors = 0
             if self._blockcheck_done(data):
                 return self._parse_blockcheck(data)
             time.sleep(1.5)
@@ -151,6 +159,10 @@ class RouterClient:
             except (TypeError, ValueError):
                 pass
         targets = data.get("targets")
+        # Панель может вернуть targets как dict {host: {...}} — _parse_blockcheck
+        # это поддерживает, а здесь раньше не учитывалось → вечный timeout.
+        if isinstance(targets, dict) and targets:
+            return all(isinstance(t, dict) and "blocked" in t for t in targets.values())
         if isinstance(targets, list) and targets:
             return all(isinstance(t, dict) and "blocked" in t for t in targets)
         return False
@@ -269,12 +281,9 @@ class RouterClient:
         if self._ssh_failure:
             return {"ok": False, "error": self._ssh_failure, "stdout": "", "stderr": ""}
         if not self._connect_ssh():
-            error = self._ssh_failure or "SSH недоступен"
-            if self._ssh_mitm:
-                error += (" ВНИМАНИЕ: ключ хоста роутера изменился — это может быть атака "
-                          "MITM или смена ключа после перепрошивки. Проверьте known_hosts.txt.")
-            return {"ok": False, "error": error, "stdout": "", "stderr": "",
-                    "mitm": self._ssh_mitm}
+            # _ssh_failure уже содержит явное MITM-сообщение при смене ключа.
+            return {"ok": False, "error": self._ssh_failure or "SSH недоступен",
+                    "stdout": "", "stderr": "", "mitm": self._ssh_mitm}
 
         try:
             _, stdout, stderr = self._ssh_client.exec_command(command, timeout=self.cfg.ssh_timeout)
@@ -323,8 +332,16 @@ class RouterClient:
                 self._ssh_mitm = False
                 return True
             except paramiko.BadHostKeyException as exc:
+                # Ключ хоста сменился — возможная MITM-атака. Не пробуем другие
+                # порты и не маскируем под «SSH недоступен».
                 self._ssh_mitm = True
-                last_error = f"порт {port}: несовпадение ключа хоста: {exc}"
+                client.close()
+                self._ssh_failure = (
+                    f"ВНИМАНИЕ: SSH-ключ {self.cfg.router_host}:{port} НЕ совпадает с сохранённым "
+                    f"в known_hosts.txt — возможна MITM-атака ({exc}). "
+                    "Если роутер перепрошивали — удалите known_hosts.txt и подключитесь заново."
+                )
+                return False
             except (paramiko.SSHException, OSError) as exc:
                 last_error = f"порт {port}: {exc}"
         client.close()
@@ -460,12 +477,16 @@ class RouterClient:
                 continue
             state = str(item.get("state", "")).upper()
             unreplied = item.get("unreplied")
-            reply_bytes = item.get("reply_bytes", 0)
+            reply_raw = item.get("reply_bytes")
+            has_reply = reply_raw is not None
             try:
-                reply_bytes = int(reply_bytes)
+                reply_bytes = int(reply_raw) if has_reply else 0
             except (TypeError, ValueError):
-                reply_bytes = 0
-            if state == "SYN_SENT" and (unreplied is True or str(unreplied).lower() in {"1", "true"} or reply_bytes == 0):
+                reply_bytes, has_reply = 0, False
+            # Отсутствие поля reply_bytes ≠ «0 байт»: у обычного
+            # устанавливающегося соединения поле может просто отсутствовать.
+            zero_reply = has_reply and reply_bytes == 0
+            if state == "SYN_SENT" and (unreplied is True or str(unreplied).lower() in {"1", "true"} or zero_reply):
                 proof.append({
                     "dst": dst, "dport": item.get("dport"), "state": state,
                     "unreplied": unreplied, "reply_bytes": reply_bytes,

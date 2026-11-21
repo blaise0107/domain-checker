@@ -210,6 +210,59 @@ class DecisionTests(unittest.TestCase):
         action = next(a for a in v.actions if a.kind == "tunnel")
         self.assertNotIn("уже есть", action.note)
 
+    def test_dns_verdict_beats_ip_proof(self):
+        """DNS-подмена (verdict=dns) важнее conntrack SYN_SENT — не IP-блок."""
+        data = base_data(
+            blockcheck={"ok": True, "targets": {
+                "example.com": {"blocked": True, "verdict": "dns", "code": 0,
+                                "err": "lookup example.com on 1.1.1.1: no such host"}}},
+            dns={"example.com": {"ok": True, "ips": ["94.156.128.52"]}},
+            ip_addresses=["94.156.128.52"],
+            connections={"ok": True, "items": [
+                {"dst": "94.156.128.52", "dport": "443", "state": "SYN_SENT",
+                 "unreplied": True, "reply_bytes": 0}]},
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        self.assertEqual(v.level, "DNS")
+
+    def test_nxdomain_requires_successful_empty_dns(self):
+        """Упавший DNS-тест (ok=False) + 'no such host' — не NXDOMAIN."""
+        data = base_data(
+            blockcheck={"ok": True, "targets": {
+                "example.com": {"blocked": True, "verdict": "dns", "code": 0,
+                                "err": "lookup example.com: no such host"}}},
+            dns={"example.com": {"ok": False, "error": "timeout", "ips": []}},
+            ip_addresses=[],
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        self.assertNotEqual(v.level, "NXDOMAIN")
+
+    def test_failed_dns_probe_is_not_suspicious(self):
+        """Сетевой провал DNS-теста не должен давать ложный DNS-вердикт."""
+        data = base_data(
+            blockcheck={"ok": True, "targets": {
+                "example.com": {"blocked": False, "verdict": "ok", "code": 200}}},
+            dns={"example.com": {"ok": False, "error": "timeout", "ips": []}},
+            ip_addresses=[],
+        )
+        v = analyze("example.com", data, self.knowledge, self.cfg)
+        self.assertEqual(v.level, "OK")
+
+    def test_ip_proof_requires_reply_bytes_field(self):
+        """SYN_SENT без поля reply_bytes — не доказательство IP-блока."""
+        from src.core.router import RouterClient
+        items = [{"dst": "1.1.1.1", "dport": "443", "state": "SYN_SENT"}]
+        self.assertEqual(RouterClient.ip_block_evidence(items, ["1.1.1.1"]), [])
+        items2 = [{"dst": "1.1.1.1", "state": "SYN_SENT", "reply_bytes": 0}]
+        self.assertEqual(len(RouterClient.ip_block_evidence(items2, ["1.1.1.1"])), 1)
+
+    def test_zero_connect_and_doh_helpers(self):
+        from src.core.decision import _is_doh, _zero_connect
+        self.assertTrue(_zero_connect({"connect_ms": "0ms"}))
+        self.assertTrue(_zero_connect({"connect": "0.000000s"}))
+        self.assertFalse(_is_doh("playdoh.com"))
+        self.assertTrue(_is_doh("dns.google"))
+
     def test_report_contains_actions(self):
         data = base_data(blockcheck={"ok": True, "targets": {
             "example.com": {"blocked": True, "verdict": "timeout", "ttfb_ms": 0, "connect_ms": 12}}})

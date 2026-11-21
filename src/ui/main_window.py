@@ -106,6 +106,8 @@ class SettingsDialog(QDialog):
         self.bc_timeout = QSpinBox(); self.bc_timeout.setRange(10, 600); self.bc_timeout.setValue(int(cfg.blockcheck_timeout))
         self.save_password = QCheckBox("Сохранить пароль в config.local.json")
         self.save_password.setChecked(cfg.save_password)
+        # Не редактируется в UI, но не должен теряться при сохранении настроек.
+        self._ssh_timeout = cfg.ssh_timeout
 
         form.addRow("Адрес роутера:", self.host)
         form.addRow("Порт панели NFQWS2:", self.panel_port)
@@ -138,6 +140,7 @@ class SettingsDialog(QDialog):
             ssh_ports=ports or (222, 22),
             http_timeout=float(self.http_timeout.value()),
             blockcheck_timeout=float(self.bc_timeout.value()),
+            ssh_timeout=self._ssh_timeout,
             save_password=self.save_password.isChecked(),
         )
 
@@ -165,7 +168,10 @@ class HistoryDialog(QDialog):
         row.addWidget(close_btn)
         layout.addLayout(row)
 
-        for item in load_history():
+        # Держим снимок истории: воркер может дописать запись, пока диалог открыт,
+        # и повторная загрузка съехала бы с индексом строки.
+        self._items = load_history()
+        for item in self._items:
             r = self.table.rowCount()
             self.table.insertRow(r)
             for col, key in enumerate(("timestamp", "domain", "level", "title")):
@@ -176,7 +182,7 @@ class HistoryDialog(QDialog):
         row = self.table.currentRow()
         if row < 0:
             return
-        items = load_history()
+        items = self._items
         if row >= len(items):
             return
         dialog = QDialog(self)
@@ -409,11 +415,11 @@ class MainWindow(QMainWindow):
             box = QGroupBox(f"{idx}. {action.title}")
             layout = QVBoxLayout(box)
             if action.path:
-                path_label = QLabel(f"Путь: <code>{action.path}</code>")
+                path_label = QLabel(f"Путь: <code>{html.escape(action.path)}</code>")
                 path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 layout.addWidget(path_label)
             if action.line:
-                line_label = QLabel(f"Добавить: <code>{action.line}</code>")
+                line_label = QLabel(f"Добавить: <code>{html.escape(action.line)}</code>")
                 line_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 layout.addWidget(line_label)
             if action.commands:
@@ -432,7 +438,7 @@ class MainWindow(QMainWindow):
                 open_btn.clicked.connect(lambda checked=False, url=action.url: QDesktopServices.openUrl(QUrl(url)))
                 layout.addWidget(open_btn)
             if action.note:
-                note = QLabel(action.note)
+                note = QLabel(html.escape(action.note))
                 note.setWordWrap(True)
                 note.setStyleSheet("color: #546e7a;")
                 layout.addWidget(note)

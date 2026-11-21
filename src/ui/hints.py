@@ -155,6 +155,16 @@ TOOLTIPS: dict[str, dict[str, str]] = {
         "intermediate": "Уровень блокировки и уверенность вердикта.",
         "pro": "Verdict.level / Verdict.confidence",
     },
+    "open_evidence": {
+        "novice": "Открыть большое окно со всеми проверками — там удобно читать длинные строки и копировать данные.",
+        "intermediate": "Открыть полную таблицу доказательств в отдельном окне.",
+        "pro": "Open EvidenceDialog (full table, copy)",
+    },
+    "open_pitfalls": {
+        "novice": "Открыть большое окно со всеми предупреждениями и подсказками про VPN, 403 и другие ловушки.",
+        "intermediate": "Открыть полный список предупреждений и подводных камней.",
+        "pro": "Open PitfallsDialog (full text, copy)",
+    },
 }
 
 

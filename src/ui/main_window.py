@@ -22,6 +22,7 @@ from ..core.knowledge import Knowledge
 from ..core.normalize import candidate_hosts, normalize_domain
 from ..core.report import add_history, build_markdown, load_history
 from ..core.router import RouterClient
+from .detail_dialogs import EvidenceDialog, PitfallsDialog
 from .hints import (
     MODE_LABELS, action_note, ai_prompt, mode_of, normalize_mode, tooltip, verdict_text,
 )
@@ -335,7 +336,13 @@ class MainWindow(QMainWindow):
         self.evidence_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.evidence_table.setColumnWidth(1, 620)
         self.evidence_table.setToolTip(tooltip("evidence", mode))
+        self.evidence_table.setMaximumHeight(150)
         ev_layout.addWidget(self.evidence_table)
+        self.evidence_open = QPushButton("Открыть полностью ↗")
+        self.evidence_open.setProperty("class", "secondary")
+        self.evidence_open.clicked.connect(self._open_evidence)
+        self.evidence_open.setToolTip(tooltip("open_evidence", mode))
+        ev_layout.addWidget(self.evidence_open)
         layout.addWidget(self.evidence_box, stretch=2)
 
         self.warnings_box = QGroupBox("Предупреждения и подводные камни")
@@ -344,7 +351,13 @@ class MainWindow(QMainWindow):
         self.warnings_browser = QTextBrowser()
         self.warnings_browser.setOpenExternalLinks(False)
         self.warnings_browser.setToolTip(tooltip("warnings", mode))
+        self.warnings_browser.setMaximumHeight(110)
         warn_layout.addWidget(self.warnings_browser)
+        self.warnings_open = QPushButton("Открыть полностью ↗")
+        self.warnings_open.setProperty("class", "secondary")
+        self.warnings_open.clicked.connect(self._open_pitfalls)
+        self.warnings_open.setToolTip(tooltip("open_pitfalls", mode))
+        warn_layout.addWidget(self.warnings_open)
         layout.addWidget(self.warnings_box, stretch=1)
 
         self.known_box = QGroupBox("Эталонные записи из базы знаний")
@@ -565,6 +578,18 @@ class MainWindow(QMainWindow):
 
     # ---------- меню/сервис ----------
 
+    def _open_evidence(self) -> None:
+        if self.verdict is None:
+            QMessageBox.information(self, "Нет данных", "Сначала проверьте домен.")
+            return
+        EvidenceDialog(self.verdict, self.cfg).exec()
+
+    def _open_pitfalls(self) -> None:
+        if self.verdict is None:
+            QMessageBox.information(self, "Нет данных", "Сначала проверьте домен.")
+            return
+        PitfallsDialog(self.verdict, self.cfg).exec()
+
     def _on_mode_changed(self, index: int) -> None:
         keys = ["novice", "intermediate", "pro"]
         self.cfg.hint_mode = keys[index] if 0 <= index < len(keys) else "novice"
@@ -576,7 +601,9 @@ class MainWindow(QMainWindow):
             (self.mode_combo, "hint_mode"), (self.mode_lbl, "hint_mode"),
             (self.term_btn, "terminal"), (self.settings_btn, "settings"), (self.history_btn, "history"),
             (self.evidence_table, "evidence"), (self.evidence_box, "evidence"),
+            (self.evidence_open, "open_evidence"),
             (self.warnings_browser, "warnings"), (self.warnings_box, "warnings"),
+            (self.warnings_open, "open_pitfalls"),
             (self.known_browser, "known"), (self.known_box, "known"), (self.level_label, "level_label"),
         ):
             widget.setToolTip(tooltip(key, mode))
